@@ -1,0 +1,9 @@
+# compiled binaries
+hilbert_ldl
+hilbert_ldl_posit
+hilbert_ldl_positq
+hilbert_ldl_refine
+positenc_test
+bquire_test
+quire32i_test
+*.o
