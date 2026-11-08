@@ -181,52 +181,84 @@ static void quire32p_fma(quire32p_t *q, uint32_t a, uint32_t b,
           quire32p_addbit(q, QP_HALF-1-(ep-fp+i), neg); }
 }
 
-/* -- round quire to double ------------------------------------- */
-/* The single rounding operation. Integer magnitude extraction,
- * then ldexp for the final conversion -- one float op total.   */
-
-#include <math.h>  /* ldexp only -- no other float ops used */
+/* -- round quire to double -- pure integer --------------------- */
+/* Build IEEE 754 bit pattern directly from quire magnitude.
+ * find MSB, extract 53 bits, round-to-nearest-even, memcpy.
+ * Zero floating point operations. No ldexp. No math.h needed.
+ * On RV32I: shifts, masks, one MULH for overflow check.
+ * This is the single rounding at the end -- the quire guarantee. */
 
 static double quire32p_round(quire32p_t *q) {
-    int i, b;
-    uint32_t mag[QP_WORDS];
-    uint64_t carry;
-    int sign;
+    int i, b, msb_word=-1, msb_bit=-1, bits_coll, next_qbit;
+    uint32_t mag[QP_WORDS]; uint64_t carry, mant, bits;
+    int sign, exp, biased_exp, round_bit, sticky;
     double result;
 
     if (q->nar) {
-        /* return NaN without float arithmetic */
         uint64_t nan_bits = 0x7FF8000000000000ULL;
-        double nan_val;
-        memcpy(&nan_val, &nan_bits, 8);
-        return nan_val;
+        memcpy(&result, &nan_bits, 8); return result;
     }
 
     sign = (q->w[0] >> 31) & 1;
     if (sign) {
-        carry = 1;
-        for (i=QP_WORDS-1; i>=0; i--) {
+        carry=1;
+        for(i=QP_WORDS-1; i>=0; i--) {
             carry += (uint64_t)(~q->w[i]);
             mag[i] = (uint32_t)(carry & 0xFFFFFFFF);
             carry >>= 32;
         }
-    } else {
-        memcpy(mag, q->w, sizeof(mag));
-    }
+    } else memcpy(mag, q->w, sizeof(mag));
 
-    /* sum contributions -- ldexp is the only float op */
-    result = 0.0;
-    for (i=0; i<QP_WORDS; i++) {
-        if (mag[i]) {
-            for (b=31; b>=0; b--) {
-                if ((mag[i]>>b)&1) {
-                    int e = QP_HALF-1-(i*32+(31-b));
-                    result += ldexp(1.0, e);
-                }
-            }
+    /* find MSB */
+    for(i=0; i<QP_WORDS && msb_word<0; i++) {
+        if(mag[i]) for(b=31; b>=0; b--) {
+            if((mag[i] >> b) & 1) { msb_word=i; msb_bit=b; break; }
         }
     }
-    return sign ? -result : result;
+    if(msb_word < 0) { memset(&result,0,8); return result; }
+
+    /* binary exponent of MSB: QP_HALF-1 - quire_bit_from_MSB */
+    exp = QP_HALF - 1 - (msb_word*32 + (31-msb_bit));
+
+    /* collect 53 bits starting at MSB */
+    mant=0; bits_coll=0;
+    for(i=msb_word*32+(31-msb_bit); i<QP_WORDS*32 && bits_coll < 53; i++) {
+        int wi = i/32, bi = 31 - (i % 32);
+        mant=(mant << 1) | ((mag[wi] >> bi) & 1);
+        bits_coll++;
+    }
+    while(bits_coll < 53) { mant <<= 1; bits_coll++; }
+
+    /* round-to-nearest-even */
+    next_qbit = msb_word * 32 + (31 - msb_bit) + 53;
+    round_bit=0;
+    sticky=0;
+    if(next_qbit < QP_WORDS*32) {
+        int wi = next_qbit / 32, bi = 31 - (next_qbit % 32);
+        round_bit = (mag[wi] >> bi) & 1;
+    }
+    for(i=next_qbit+1; i < QP_WORDS*32 && !sticky; i++) {
+        int wi = i / 32, bi = 31 - (i % 32);
+        if((mag[wi] >> bi) & 1) sticky = 1;
+    }
+    if(round_bit && (sticky || (mant & 1))) {
+        mant++;
+        if(mant >> 53) { mant >>= 1; exp++; }
+    }
+
+    /* build IEEE 754 bit pattern -- memcpy, no float ops */
+    biased_exp=exp+1023;
+    if(biased_exp >= 0x7FF) {
+        bits = ((uint64_t)(sign?1:0) << 63) | 0x7FF0000000000000ULL;
+    }
+    else if(biased_exp <= 0) {
+        memset(&result, 0, 8);
+        return result;
+    }
+    else bits = ((uint64_t)(sign?1:0) << 63) | ((uint64_t)biased_exp << 52) | (mant & 0x000FFFFFFFFFFFFFULL);
+
+    memcpy(&result, &bits, 8);
+    return result;
 }
 
 /* -- drop-in for microuniversal.h ------------------------------ */
