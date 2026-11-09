@@ -60,6 +60,12 @@ cc -o positenc_test positenc_test.c -lm && ./positenc_test
 cc -o bquire_test bquire_test.c -lm && ./bquire_test
 ```
 
+Exhaustive correctness check - 3 min on 64 harts, hours on a laptop. Adjust thread count to taste.
+
+```bash
+cc -o trig56_exhaust trig56_exhaust.c -lm -lpthread && ./trig56_exhaust 4
+```
+
 No dependencies. No build system. C89 throughout.
 
 ---
