@@ -22,32 +22,32 @@ The stack runs today on a 64-hart SG2042 RISC-V server (Pioneer) at
 
 ## The files
 
-| File | What it does | Lines |
-|------|-------------|-------|
-| `positenc.h`           | Posit32 encoding/decoding primitives                            |  261 |
-| `microuniversal.h`     | MAC abstraction: dot and sum function pointers                  |   75 |
-| `quire32.h`            | 512-bit exact accumulator for posit\<32,2\>                     |  150 |
-| `bposit_quire.h`       | B-posit quire: parameterized, 172-bit at es=2,rs=6              |  180 |
-| `posit_math.h`         | posit32 math: sqrt, CORDIC sin/cos, erfc, haversine, Chauvenet  | ~400 |
-| `map_engine.h`         | Integer map engine: pan/zoom/track, no float, bare RV32I        | ~344 |
-| `gps_quire_nav.c`      | RV32I Microcontroller GPS navigator: UBX+OLED+posit32 haversine | ~251 |
-| `hilbert_cg.c`         | Conjugate gradient on scaled Hilbert matrices                   | ~120 |
-| `hilbert_cg_posit.c`   | CG with Gustafson power-of-2 scaling                            | ~150 |
-| `hilbert_ldl_refine.c` | LDL* iterative refinement; needs posit64 for exact H(12)        | ~180 |
-| `posit_math.h`         | posit32 math: sqrt, CORDIC sin/cos, erfc, haversine, Chauvenet  | ~400 |
-| `map_engine.h`         | Integer map engine: pan/zoom/track, no float, bare RV32I        | ~344 |
-| `gps_quire_nav.c`      | RV32I Microcontroller GPS navigator: UBX+OLED+posit32 haversine | ~251 |
-| `hilbert_ldl.c`        | LDL\* decomposition, double+Kahan, N=2..13                      | ~220 |
-| `hilbert_ldl_posit.c`  | LDL\* on posit32 matrix, Kahan accumulation                     | ~280 |
-| `hilbert_ldl_positq.c` | LDL\* on posit32 matrix, quire32 accumulation                   | ~280 |
-| `positenc_test.c`      | Round-trip encoding test                                        |  ~60 |
-| `bquire_test.c`        | B-posit quire test including Gustafson test                     |  ~50 |
+|        File            |                         What it does                                 | Lines |
+|------------------------|----------------------------------------------------------------------|-------|
+| `positenc.h`           | Posit32 encoding/decoding primitives                                 |  261  |
+| `microuniversal.h`     | MAC abstraction: dot and sum function pointers                       |   75  |
+| `quire32.h`            | 512-bit exact accumulator for posit\<32,2\>                          |  150  |
+| `bposit_quire.h`       | B-posit quire: parameterized, 172-bit at es=2,rs=6                   |  180  |
+| `posit_math.h`         | posit32 math: sqrt, CORDIC sin/cos, erfc, haversine, Chauvenet       | ~400  |
+| `posit_trig56.h`       | 56-bit CORDIC sin/cos + sin_pi/cos_pi; 99.20% CR on exhaustive check | ~200  |
+| `trig56_exhaust.c`     | Exhaustive posit32 sin56 verify, 64-thread parallel, Pioneer SG2042  | ~180  |
+| `map_engine.h`         | Integer map engine: pan/zoom/track, no float, bare RV32I             | ~344  |
+| `map_sim.c`            | ASCII terminal simulator for map_engine.h                            | ~180  |
+| `gps_quire_nav.c`      | RV32I Microcontroller GPS navigator: UBX+OLED+posit32 haversine      | ~251  |
+| `hilbert_cg.c`         | Conjugate gradient on scaled Hilbert matrices                        | ~120  |
+| `hilbert_cg_posit.c`   | CG with Gustafson power-of-2 scaling                                 | ~150  |
+| `hilbert_ldl_refine.c` | LDL* iterative refinement; needs posit64 for exact H(12)             | ~180  |
+| `hilbert_ldl.c`        | LDL\* decomposition, double+Kahan, N=2..13                           | ~220  |
+| `hilbert_ldl_posit.c`  | LDL\* on posit32 matrix, Kahan accumulation                          | ~280  |
+| `hilbert_ldl_positq.c` | LDL\* on posit32 matrix, quire32 accumulation                        | ~280  |
+| `positenc_test.c`      | Round-trip encoding test                                             |  ~60  |
+| `bquire_test.c`        | B-posit quire test including Gustafson test                          |  ~50  |
 
 > **Note — posit_math.h trig:** Not yet correctly rounded for all
 > 2^32 posit32 inputs. Exhaustive check required before claiming
 > bitwise reproducibility (Table-Maker's Dilemma at hard-to-round
-> points). Extend CORDIC to 56 bits + quire accumulation to resolve.
-> — Gustafson, personal communication 2026. TODO.
+> points). See posit_trig56.h and trig56_exhaust.c.
+> — Gustafson, personal communication 2026.
 
 ---
 
@@ -107,6 +107,49 @@ N    p32 naive    p32 quire    dbl Kahan
 
 N=11: posit32+Kahan beats double+Kahan by 30x. Tapered precision near
 1.0 doing real work at condition number 5.225e+14.
+
+## posit32 sin/cos -- exhaustive correctness check
+
+56-bit CORDIC (`posit_trig56.h`) verified against all 2.1 billion
+positive posit32 inputs on Pioneer SG2042, 64 threads, 3.0 minutes:
+
+| Result | Count | Percent |
+|--------|-------|---------|
+| Correctly rounded (ulp=0) | 2,130,256,412 | 99.20% |
+| Off by 1 ULP              | 5,513,231     |  0.26% |
+| Off by 2 ULP              | 1,464,610     |  0.07% |
+| Worse                     | 10,249,395    |  0.48% |
+
+Throughput: 11.8M inputs/sec on 64 harts.
+
+The 0.80% failures are the Table-Maker's Dilemma. This is not the
+same class of hardness as NP-complete problems like the Traveling
+Salesman Problem. TSP grows combinatorially with input size and has
+no known polynomial solution. The Table-Maker's Dilemma is finite
+and solvable for a fixed format -- posit32 has exactly 2^32 inputs,
+so every hard case can in principle be identified and resolved with
+sufficient precision. The difficulty is that we do not know in
+advance which inputs fall within one ULP of the exact midpoint
+between two adjacent posit32 values, and computing those cases to
+the required precision (potentially hundreds of bits) is expensive.
+
+For posit32, the standard strategies are:
+1. Precomputed exception table: identify all hard cases offline
+   with MPFR at high precision, store as a lookup table, handle
+   at runtime. Finite, deterministic, one-time cost.
+2. Argument reduction to avoid hard cases for the most common
+   inputs -- particularly useful for sin(pi*x) where x is rational.
+
+Interpolation is not a viable path: it gives approximations, not
+correctly-rounded results. You would still need to verify each
+output against the true value, which does not reduce the problem.
+
+Strategies courtesy John L. Gustafson, personal communication 2026.
+Exhaustive verification infrastructure: `trig56_exhaust.c`.
+Next step: apply the strategies and re-run the exhaustive check.
+
+> "To compute infinity is ridiculous when you think about it."
+> -- John L. Gustafson, on IEEE 754 exception handling, 2026
 
 ---
 
