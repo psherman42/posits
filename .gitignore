@@ -7,3 +7,9 @@ positenc_test
 bquire_test
 quire32i_test
 *.o
+trig56_test
+trig56_exhaust
+map_sim
+posit_math_test2
+gain_vs_n
+quire32i_fma_test
