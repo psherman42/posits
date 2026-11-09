@@ -16,6 +16,10 @@
  * using posit32 + real quire. We use double + Kahan as the accumulator.
  * How many passes do we need?
  *
+ * Note: to replicate Gustafson's exact H(12) inversion, the
+ * refinement correction vector must use posit64, not double.
+ * double is insufficient at cond~1.44e16. -- Gustafson, 2026.
+ *
  * Uses microuniversal.h: dot/sum function pointers.
  * lab.riscvthai.org/posits/
  */

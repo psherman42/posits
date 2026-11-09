@@ -24,17 +24,30 @@ The stack runs today on a 64-hart SG2042 RISC-V server (Pioneer) at
 
 | File | What it does | Lines |
 |------|-------------|-------|
-| `positenc.h` | Posit32 encoding/decoding primitives | 261 |
-| `microuniversal.h` | MAC abstraction: dot and sum function pointers | 75 |
-| `quire32.h` | 512-bit exact accumulator for posit\<32,2\> | 150 |
-| `bposit_quire.h` | B-posit quire: parameterized, 172-bit at es=2,rs=6 | 180 |
-| `hilbert_cg.c` | Conjugate gradient on scaled Hilbert matrices | ~120 |
-| `hilbert_cg_posit.c` | CG with Gustafson power-of-2 scaling | ~150 |
-| `hilbert_ldl.c` | LDL\* decomposition, double+Kahan, N=2..13 | ~220 |
-| `hilbert_ldl_posit.c` | LDL\* on posit32 matrix, Kahan accumulation | ~280 |
-| `hilbert_ldl_positq.c` | LDL\* on posit32 matrix, quire32 accumulation | ~280 |
-| `positenc_test.c` | Round-trip encoding test | ~60 |
-| `bquire_test.c` | B-posit quire test including Gustafson test | ~50 |
+| `positenc.h`           | Posit32 encoding/decoding primitives                            |  261 |
+| `microuniversal.h`     | MAC abstraction: dot and sum function pointers                  |   75 |
+| `quire32.h`            | 512-bit exact accumulator for posit\<32,2\>                     |  150 |
+| `bposit_quire.h`       | B-posit quire: parameterized, 172-bit at es=2,rs=6              |  180 |
+| `posit_math.h`         | posit32 math: sqrt, CORDIC sin/cos, erfc, haversine, Chauvenet  | ~400 |
+| `map_engine.h`         | Integer map engine: pan/zoom/track, no float, bare RV32I        | ~344 |
+| `gps_quire_nav.c`      | RV32I Microcontroller GPS navigator: UBX+OLED+posit32 haversine | ~251 |
+| `hilbert_cg.c`         | Conjugate gradient on scaled Hilbert matrices                   | ~120 |
+| `hilbert_cg_posit.c`   | CG with Gustafson power-of-2 scaling                            | ~150 |
+| `hilbert_ldl_refine.c` | LDL* iterative refinement; needs posit64 for exact H(12)        | ~180 |
+| `posit_math.h`         | posit32 math: sqrt, CORDIC sin/cos, erfc, haversine, Chauvenet  | ~400 |
+| `map_engine.h`         | Integer map engine: pan/zoom/track, no float, bare RV32I        | ~344 |
+| `gps_quire_nav.c`      | RV32I Microcontroller GPS navigator: UBX+OLED+posit32 haversine | ~251 |
+| `hilbert_ldl.c`        | LDL\* decomposition, double+Kahan, N=2..13                      | ~220 |
+| `hilbert_ldl_posit.c`  | LDL\* on posit32 matrix, Kahan accumulation                     | ~280 |
+| `hilbert_ldl_positq.c` | LDL\* on posit32 matrix, quire32 accumulation                   | ~280 |
+| `positenc_test.c`      | Round-trip encoding test                                        |  ~60 |
+| `bquire_test.c`        | B-posit quire test including Gustafson test                     |  ~50 |
+
+> **Note — posit_math.h trig:** Not yet correctly rounded for all
+> 2^32 posit32 inputs. Exhaustive check required before claiming
+> bitwise reproducibility (Table-Maker's Dilemma at hard-to-round
+> points). Extend CORDIC to 56 bits + quire accumulation to resolve.
+> — Gustafson, personal communication 2026. TODO.
 
 ---
 
@@ -159,9 +172,9 @@ It is published here, openly, with full attribution.
 ## CLZ without Zbb (pure RV32I)
 
 Regime field decoding requires count-leading-zeros. On cores with the
-Zbb bit-manipulation extension, `CLZ` is a single instruction. On the
-FE310 and all bare RV32I cores, we provide a 6-comparison software
-implementation in `bposit_quire.h`:
+Zbb bit-manipulation extension, `CLZ` is a single instruction. On a
+small microcontroller and all bare RV32I cores, we provide a
+6-comparison software implementation in `bposit_quire.h`:
 
 ```c
 static int bposit_clz32(uint32_t x) {

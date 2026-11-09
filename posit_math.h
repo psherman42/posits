@@ -80,6 +80,13 @@ static uint32_t posit32_sqrt(uint32_t a) {
     return _pe((double)q / 1073741824.0);
 }
 
+/* WARNING: posit32 trig functions are not yet correctly rounded
+ * for all 2^32 posit32 inputs. Exhaustive verification required
+ * before claiming bitwise reproducibility (Table-Maker's Dilemma
+ * applies at hard-to-round points). To resolve: extend CORDIC to
+ * 56 bits and accumulate in quire -- or use strategies from
+ * Gustafson, personal communication 2026. -- TODO                */
+
 /* -- CORDIC for sin/cos ---------------------------------------- */
 /* Pure shifts and adds. 20 iterations = posit32 precision.
  *
@@ -265,6 +272,101 @@ static int posit32_chauvenet(uint32_t xi, uint32_t mean,
 
 static uint32_t posit32_deg2rad(uint32_t deg) {
     return p32_mul(deg, _pe(3.14159265358979 / 180.0));
+}
+
+/* -- BRAD integer haversine and bearing ----------------------- */
+/* Input: lat/lon as BRAD integers (BRAD_PI=16384=180 degrees).
+ * Uses integer sin/cos from your 2020 math.c -- Q12 fixed-point.
+ * No floating point in the conversion path.
+ * One _pe() call at the posit32 encoding boundary -- unavoidable.
+ *
+ * UBX to BRAD: brad = ubx_1e7 / 109863
+ * BRAD to degrees: deg = brad * 180 / 16384                     */
+
+/* -- BRAD integer trig (Paul Sherman, 2020-05-12) ------------- */
+/* Binary radian arithmetic: BRAD_PI = 16384 = 180 degrees.
+ * Full circle = 32768. sin/cos return Q12 fixed-point.
+ * No floating point. No FPU. Pure RV32I.                        */
+
+#define BRAD_PI   16384
+#define BRAD_HPI  8192
+#define BRAD_2PI  32768
+
+static int32_t _brad_sin_kernel(int32_t x) {
+    uint8_t c; uint32_t y;
+    enum { A1=3370945099UL, B1=2746362156UL, C1=292421UL };
+    enum { n=13, p=32, q=31, r=3, a=12 };
+    x <<= 1; c = x<0;
+    if(x==(x | 0x4000)) x = (1<<15) - x;
+    x = (x & 0x7FFF) >> 1;
+    y = (C1 * ((uint32_t)x)) >> n;
+    y = B1 - (((uint32_t)x * y) >> r);
+    y = (uint32_t)x * (y >> n);
+    y = (uint32_t)x * (y >> n);
+    y = A1 - (y >> (p - q));
+    y = (uint32_t)x * (y >> n);
+    y = (y+(1UL << (q - a - 1))) >> (q - a);
+    return c ? -(int32_t)y : (int32_t)y;
+}
+
+static int32_t brad_sin(int32_t x) {
+    switch((x/BRAD_HPI) & 3) {
+        case 0: return  _brad_sin_kernel(x);
+        case 1: return  _brad_sin_kernel(BRAD_PI - x);
+        case 2: return -_brad_sin_kernel(x - BRAD_PI);
+        case 3: return -_brad_sin_kernel(BRAD_2PI - x);
+        default: return 0;
+    }
+}
+
+static int32_t brad_cos(int32_t x) { return brad_sin(BRAD_HPI-x); }
+
+static int32_t brad_atan2(int32_t x, int32_t y) {
+    int32_t phi=0, t, t2, dphi, fixshft=15;
+    if(y==0) return x >= 0 ? 0 : BRAD_PI;
+    if(y<0){ x=-x; y=-y; phi+=4; }
+    if(x<=0) { t=x; x=y;y=t; phi+=2; }
+    if(x<=y) { t=y-x; x+=y; y=t; phi+=1; }
+    phi *= BRAD_PI/4;
+    t = (y << fixshft)/x; t2 = -t*t >> fixshft;
+    dphi = 0x0470;
+    dphi = 0x1029 + (t2*dphi >> fixshft);
+    dphi = 0x1F0B + (t2*dphi >> fixshft);
+    dphi = 0x364C + (t2*dphi >> fixshft);
+    dphi = 0xA2FC + (t2*dphi >> fixshft);
+    dphi = dphi*t >> fixshft;
+    return phi+((dphi+4)>>3);
+}
+
+/* -- BRAD integer haversine and bearing ---------------------- */
+/* Input: lat/lon as BRAD integers (BRAD_PI=16384=180 degrees).
+ * One _pe() call at the posit32 encoding boundary -- unavoidable.
+ * UBX to BRAD: brad = ubx_1e7 / 109863
+ * BRAD to degrees: deg = brad * 180 / 16384                     */
+
+static uint32_t posit32_haversine_brad(int32_t lat1, int32_t lon1,
+                                       int32_t lat2, int32_t lon2) {
+    int32_t dlat_h = (lat2-lat1)>>1;
+    int32_t dlon_h = (lon2-lon1)>>1;
+    int32_t sdlat  = brad_sin(dlat_h);
+    int32_t sdlon  = brad_sin(dlon_h);
+    int32_t clat1  = brad_cos(lat1);
+    int32_t clat2  = brad_cos(lat2);
+    int32_t a = (sdlat*sdlat>>12)
+              + (((clat1*clat2)>>12)*(sdlon*sdlon>>12)>>12);
+    uint32_t pa  = _pe((double)a/16777216.0);
+    uint32_t R   = _pe(6371000.0);
+    uint32_t two = _pe(2.0);
+    return p32_mul(p32_mul(two,R),posit32_asin(posit32_sqrt(pa)));
+}
+
+static int32_t posit32_bearing_brad(int32_t lat1, int32_t lon1,
+                                    int32_t lat2, int32_t lon2) {
+    int32_t dlon = lon2-lon1;
+    int32_t y    = (brad_sin(dlon)*brad_cos(lat2))>>12;
+    int32_t x    = (brad_cos(lat1)*brad_sin(lat2)>>12)
+                 - (brad_sin(lat1)*(brad_cos(lat2)*brad_cos(dlon)>>12)>>12);
+    return brad_atan2(y,x);
 }
 
 #endif /* POSIT_MATH_H */
