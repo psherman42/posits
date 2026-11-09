@@ -103,5 +103,28 @@ int main(void) {
                (vals[i]==15.5&&rej)||(vals[i]!=15.5&&!rej)?" PASS":"");
     }
 
+    /* BRAD haversine test -- integer path, no float conversion */
+    printf("\nBRAD haversine (integer path):\n");
+    {
+        int32_t blat1 = 374005821 / 109863;
+        int32_t blon1 = -1219257115 / 109863;
+        int32_t blat2 = 373987283 / 109863;
+        int32_t blon2 = -1219243436 / 109863;
+        printf("  blat1=%d blon1=%d\n", blat1, blon1);
+        printf("  blat2=%d blon2=%d\n", blat2, blon2);
+        int32_t dlat_h = (blat2-blat1)>>1;
+        int32_t dlon_h = (blon2-blon1)>>1;
+        printf("  dlat_h=%d dlon_h=%d\n", dlat_h, dlon_h);
+        int32_t sdlat = brad_sin(dlat_h);
+        int32_t sdlon = brad_sin(dlon_h);
+        int32_t clat1 = brad_cos(blat1);
+        int32_t clat2 = brad_cos(blat2);
+        printf("  sdlat=%d sdlon=%d clat1=%d clat2=%d\n",
+               sdlat, sdlon, clat1, clat2);
+        int32_t a = (sdlat*sdlat>>12)
+                  + (((clat1*clat2)>>12)*(sdlon*sdlon>>12)>>12);
+        printf("  a=%d (exp>0)\n", a);
+    }
+
     return 0;
 }
