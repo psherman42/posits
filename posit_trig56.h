@@ -34,6 +34,11 @@
 #include <math.h>
 #include "positenc.h"
 
+/* CORDIC iteration count -- default 56, override with -DCORDIC_ITERS=N */
+#ifndef CORDIC_ITERS
+#define CORDIC_ITERS 56
+#endif
+
 /* -- Q56 fixed-point constants ------------------------------- */
 /* 1.0 in Q56 = 2^56 = 72057594037927936                        */
 
@@ -141,8 +146,13 @@ static void cordic56(int64_t angle_q56,
     else if (z >   Q56_PI2) { z  = Q56_PI-z;             flip_cos^=1; }  /* Q2 */
     else                    { ; }                                        /* Q1 */
 
+    /* CORDIC rotation loop -- shifts and adds only, no multiply.
+     * CORDIC_ITERS defaults to 56 (beyond posit32's 28-bit significand).
+     * Compile with -DCORDIC_ITERS=N to find the cliff.
+     * John L. Gustafson: "try turning down from 56 bits."              */
+    for (i = 0; i < CORDIC_ITERS; i++) {
     /* 56 CORDIC iterations -- shifts and adds only */
-    for (i = 0; i < 56; i++) {
+    //for (i = 0; i < 56; i++) {
         d  = (z >= 0) ? 1 : -1;
         xi = x - (int64_t)(d * (y >> i));
         yi = y + (int64_t)(d * (x >> i));
