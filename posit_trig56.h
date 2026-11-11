@@ -313,10 +313,26 @@ static uint32_t posit32_sin_pi56(uint32_t x) {
     else                    { xd = 2.0 - xd;  neg = 1; }
 
     /* near x=0: sin(pi*x) ≈ pi*x -- Taylor series
-     * accurate to posit32 ULP for x < 0.044               */
+     * accurate to posit32 ULP for x < 0.044
+     * adaptive extension: if result lands near posit32 midpoint,
+     * add terms 7 and 9 for extra precision -- mirrors Q63 in CORDIC */
     if (xd < 0.044) {
-        double pix = 3.14159265358979323846 * xd;
-        double r = pix * (1.0 - pix*pix/6.0 + pix*pix*pix*pix/120.0);
+        double pix  = 3.14159265358979323846 * xd;
+        double pix2 = pix * pix;
+        double r = pix * (1.0 - pix2/6.0 + pix2*pix2/120.0);
+
+        /* proximity check -- same philosophy as Q63 CORDIC extension */
+        double rn   = neg ? -r : r;
+        double near = posit_to_double(posit_from_double(rn));
+        double dist = rn - near;
+        if (dist < 0.0) dist = -dist;
+        double half_ulp = (near < 0 ? -near : near) * 3.725e-9; /* 2^-28 */
+
+        if (dist > 0.0 && dist < half_ulp) {
+            /* add Taylor terms 7 and 9 */
+            r += pix * pix2 * pix2 * pix2 * (-1.0/5040.0 + pix2/362880.0);
+        }
+
         return posit_from_double(neg ? -r : r);
     }
 
