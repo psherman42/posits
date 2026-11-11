@@ -1,0 +1,25 @@
+nohup: ignoring input
+posit32 sin56 exhaustive verification
+64 threads, 67.1M inputs each
+Pioneer SG2042, 64-hart RV64GC
+
+  8/64 threads done
+  16/64 threads done
+  24/64 threads done
+  32/64 threads done
+  40/64 threads done
+  48/64 threads done
+  56/64 threads done
+  64/64 threads done
+
+Results:
+  total inputs:    2147483648
+  perfect (ulp=0): 2138313159 (99.5730%)
+  off by 1:        4976185
+  off by 2:        0
+  worse:           4194304
+  worst ulp:       125413 at p=0x44000000 (a=1.500000)
+  wall time:       184.7 sec (3.1 min)
+  throughput:      11.6M inputs/sec
+
+9170489 failures -- Table-Maker strategies needed.

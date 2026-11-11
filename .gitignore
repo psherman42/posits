@@ -14,3 +14,6 @@ posit_math_test2
 gain_vs_n
 quire32i_fma_test
 quire32p_test
+exhaust_cospi
+exhaust_sinpi
+exhaust_42.txt
