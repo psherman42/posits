@@ -29,8 +29,10 @@ The stack runs today on a 64-hart SG2042 RISC-V server (Pioneer) at
 | `quire32.h`            | 512-bit exact accumulator for posit\<32,2\>                          |  150  |
 | `bposit_quire.h`       | B-posit quire: parameterized, 172-bit at es=2,rs=6                   |  180  |
 | `posit_math.h`         | posit32 math: sqrt, CORDIC sin/cos, erfc, haversine, Chauvenet       | ~400  |
-| `posit_trig56.h`       | 56-bit CORDIC sin/cos + sin_pi/cos_pi; 99.20% CR on exhaustive check | ~200  |
-| `trig56_exhaust.c`     | Exhaustive posit32 sin56 verify, 64-thread parallel, Pioneer SG2042  | ~180  |
+| `posit_trig56.h`       | 56-bit CORDIC sin/cos + cos_pi/sin_pi with symmetry+Taylor; CORDIC_ITERS | ~300  |
+| `trig56_exhaust.c`     | Exhaustive posit32 sin56 verify, 64-thread parallel, Pioneer SG2042      | ~180  |
+| `trig56_exhaust_cospi.c` | Exhaustive cos_pi56 verify                                             |  ~180 |
+| `trig56_exhaust_sinpi.c` | Exhaustive sin_pi56 verify                                             |  ~180 |
 | `map_engine.h`         | Integer map engine: pan/zoom/track, no float, bare RV32I             | ~344  |
 | `map_sim.c`            | ASCII terminal simulator for map_engine.h                            | ~180  |
 | `gps_quire_nav.c`      | RV32I Microcontroller GPS navigator: UBX+OLED+posit32 haversine      | ~251  |
@@ -114,21 +116,36 @@ N    p32 naive    p32 quire    dbl Kahan
 N=11: posit32+Kahan beats double+Kahan by 30x. Tapered precision near
 1.0 doing real work at condition number 5.225e+14.
 
+
 ## posit32 sin/cos -- exhaustive correctness check
 
-56-bit CORDIC (`posit_trig56.h`) verified against all 2.1 billion
-positive posit32 inputs on Pioneer SG2042, 64 threads, 3.0 minutes:
+Three implementations verified against all 2.1 billion positive posit32
+inputs on Pioneer SG2042, 64 threads, ~3 minutes each:
 
-| Result | Count | Percent |
-|--------|-------|---------|
-| Correctly rounded (ulp=0) | 2,130,256,412 | 99.20% |
-| Off by 1 ULP              | 5,513,231     |  0.26% |
-| Off by 2 ULP              | 1,464,610     |  0.07% |
-| Worse                     | 10,249,395    |  0.48% |
+Each function owns its natural domain [0, 1/2] via symmetry reduction.
+Taylor series handles the hard region where the function approaches zero;
+56-bit CORDIC handles the easy region:
 
-Throughput: 11.8M inputs/sec on 64 harts.
+    SIN(πx):  x=0 |--Taylor--| 0.044 |--CORDIC--| x=0.5
+                    sin→0 hard              sin→1 easy
 
-The 0.80% failures are the Table-Maker's Dilemma. This is not the
+    COS(πx):  x=0 |--CORDIC--| 0.456 |--Taylor--| x=0.5
+                    cos→1 easy              cos→0 hard
+
+Threshold 0.044: Taylor error (πε)⁷/5040 < 2⁻²⁸ for ε < 0.138/π.
+QB = 1e-10 fuzzy quadrant boundaries: fmod can land just above exact
+values; uniform guard on all boundaries.
+
+| Implementation | Failures | CR% | Notes |
+|----------------|----------|-----|-------|
+| `sin(x)` 56-bit CORDIC | 17,227,236 | 99.20% | baseline |
+| `cos(πx)` symmetry + Taylor near x=0.5 | 9,170,489 | 99.57% | Gustafson recommendation |
+| `sin(πx)` own symmetry + Taylor near x=0 | 12,137,511 | 99.43% | independent, parallel to cos |
+
+Throughput: 11.6-12.0M inputs/sec on 64 harts.
+CORDIC cliff: 56 iterations needed. 43 iters=97.27% CR, 42 iters=96.77% CR.
+
+The remaining failures are the Table-Maker's Dilemma. This is not the
 same class of hardness as NP-complete problems like the Traveling
 Salesman Problem. TSP grows combinatorially with input size and has
 no known polynomial solution. The Table-Maker's Dilemma is finite
@@ -140,19 +157,22 @@ between two adjacent posit32 values, and computing those cases to
 the required precision (potentially hundreds of bits) is expensive.
 
 For posit32, the standard strategies are:
-1. Precomputed exception table: identify all hard cases offline
-   with MPFR at high precision, store as a lookup table, handle
-   at runtime. Finite, deterministic, one-time cost.
-2. Argument reduction to avoid hard cases for the most common
-   inputs -- particularly useful for sin(pi*x) where x is rational.
+1. Precomputed exception table (Minefield Method, Gustafson Ch.10):
+   identify all hard cases offline with MPFR, store as a lookup table.
+   ~73-97MB for 9-12M entries -- too large for embedded (FE310: 16KB RAM).
+   Suitable for desktop/server deployment.
+2. cos(πx) and sin(πx) with symmetry reduction: already implemented,
+   cuts failures from 17.2M to 9-12M. Argument reduction to avoid the
+   hardest cases for common inputs.
 
 Interpolation is not a viable path: it gives approximations, not
-correctly-rounded results. You would still need to verify each
-output against the true value, which does not reduce the problem.
+correctly-rounded results.
 
 Strategies courtesy John L. Gustafson, personal communication 2026.
-Exhaustive verification infrastructure: `trig56_exhaust.c`.
-Next step: apply the strategies and re-run the exhaustive check.
+Exhaustive verification: `trig56_exhaust.c`, `trig56_exhaust_cospi.c`,
+`trig56_exhaust_sinpi.c`.
+Next step: Minefield Method for server deployment; accept 99.4-99.6% CR
+for embedded targets.
 
 > "To compute infinity is ridiculous when you think about it."
 > -- John L. Gustafson, on IEEE 754 exception handling, 2026
