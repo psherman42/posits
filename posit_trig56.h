@@ -355,17 +355,14 @@ static int32_t cos56_ulp(uint32_t a) {
 static int32_t cos_pi56_ulp(uint32_t a) {
     double ad    = posit_to_double(a);
     uint32_t p56 = posit32_cos_pi56(a);
-    /* reduce mod 2 before computing reference -- same as cos_pi56 */
-    //double xd = ad - floor(ad / 2.0) * 2.0;
     double xd    = fmod(ad, 2.0);
     if (xd < 0.0) xd += 2.0;
-    /* apply same symmetry as cos_pi56 to get reference in [0,0.5] */
-    if      (xd < 0.5 + QB) { ; }
-    else if (xd < 1.0 + QB) { xd = 1.0 - xd; }
-    else if (xd < 1.5 + QB) { xd = xd - 1.0; }
-    else                    { xd = 2.0 - xd; }
-    /* exact zero at boundary */
-    double ex = (xd == 0.5) ? 0.0 : cos(3.14159265358979323846 * xd);
+    /* exact zeros at quadrant boundaries where double is imprecise */
+    double ex;
+    if (fabs(xd - 0.5) < 1e-10 || fabs(xd - 1.5) < 1e-10)
+        ex = 0.0;
+    else
+        ex = cos(3.14159265358979323846 * xd);
     double ref   = (fabs(ex) < 1e-30) ? 0.0 : ex;
     uint32_t pref = posit_from_double(ref);
     return (int32_t)p56 - (int32_t)pref;
@@ -374,17 +371,14 @@ static int32_t cos_pi56_ulp(uint32_t a) {
 static int32_t sin_pi56_ulp(uint32_t a) {
     double ad    = posit_to_double(a);
     uint32_t p56 = posit32_sin_pi56(a);
-    /* reduce mod 2 before computing reference -- same as sin_pi56 */
     //double xd = ad - floor(ad / 2.0) * 2.0;
     double xd = fmod(ad, 2.0);  /* fmod preserves precision; floor/int64 fail for large posit32 */
     if (xd < 0.0) xd += 2.0;
-    /* apply same symmetry as sin_pi56 to get reference in [0,0.5] */
-    if      (xd < 0.5 + QB) { ; }
-    else if (xd < 1.0 + QB) { xd = 1.0 - xd; }
-    else if (xd < 1.5 + QB) { xd = xd - 1.0; }
-    else                    { xd = 2.0 - xd; }
-    /* exact zero at x=0 */
-    double ex = (xd < 1e-30) ? 0.0 : sin(3.14159265358979323846 * xd);
+    double ex;
+    if (xd < 1e-10 || fabs(xd - 1.0) < 1e-10)
+        ex = 0.0;
+    else
+        ex = sin(3.14159265358979323846 * xd);
     double ref   = (fabs(ex) < 1e-30) ? 0.0 : ex;
     uint32_t pref = posit_from_double(ref);
     return (int32_t)p56 - (int32_t)pref;
