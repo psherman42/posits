@@ -274,8 +274,9 @@ static void map_draw(void (*plot)(uint8_t x, uint8_t y),
 static void map_btn_a_short(void) {
     /* cycle modes */
     _mode = (map_mode_t)(((int)_mode + 1) % (int)MODE_COUNT);
-    _manual_zoom = 0;               /* reset on mode change */
-    /* entering PAN: freeze view at current center */
+    /* zoom persists across mode changes -- user sets zoom manually.
+     * uncomment to reset zoom on mode change instead:            */
+    //_manual_zoom = 0;
     /* entering TRACK: re-center on GPS */
     if (_mode == MODE_TRACK) {
         _view_lat = _gps_lat;
