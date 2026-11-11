@@ -208,7 +208,8 @@ static uint32_t posit32_cos_pi56(uint32_t x) {
     int neg = 0;
 
     /* reduce mod 2: cos(pi*(x+2)) = cos(pi*x) */
-    xd = xd - (int64_t)(xd / 2.0) * 2.0;
+    //xd = xd - (int64_t)(xd / 2.0) * 2.0;
+    xd = fmod(xd, 2.0);  /* fmod preserves precision; floor/int64 fail for large posit32 */
     if (xd < 0) xd += 2.0;
 
     /* symmetry reduction to [0, 1/2]
@@ -241,10 +242,15 @@ static uint32_t posit32_cos_pi56(uint32_t x) {
 }
 
 static uint32_t posit32_sin_pi56(uint32_t x) {
+    double xd = posit_to_double(x);
     /* sin(pi*x) = cos(pi*(x - 1/2))
      * One quadrant, one trig function, everything else is geometry.
-     * Volder 1959. Gustafson 2026.                                  */
-    double xd = posit_to_double(x);
+     * Volder 1959. Gustafson 2026.
+     * Reduce mod 2 BEFORE shifting -- precision loss at large posit32
+     * values where xd-0.5 loses the 0.5 entirely.                   */
+    //xd = xd - floor(xd / 2.0) * 2.0;
+    xd = fmod(xd, 2.0);  /* fmod preserves precision; floor/int64 fail for large posit32 */
+    if (xd < 0.0) xd += 2.0;
     return posit32_cos_pi56(posit_from_double(xd - 0.5));
 }
 
@@ -275,7 +281,11 @@ static int32_t cos56_ulp(uint32_t a) {
 static int32_t cos_pi56_ulp(uint32_t a) {
     double ad    = posit_to_double(a);
     uint32_t p56 = posit32_cos_pi56(a);
-    double ex    = cos(3.14159265358979323846 * ad);
+    /* reduce mod 2 before computing reference -- same as cos_pi56 */
+    //double xd = ad - floor(ad / 2.0) * 2.0;
+    double xd = fmod(ad, 2.0);  /* fmod preserves precision; floor/int64 fail for large posit32 */
+    if (xd < 0.0) xd += 2.0;
+    double ex    = cos(3.14159265358979323846 * xd);
     double ref   = (fabs(ex) < 1e-15) ? 0.0 : ex;
     uint32_t pref = posit_from_double(ref);
     return (int32_t)p56 - (int32_t)pref;
@@ -284,7 +294,11 @@ static int32_t cos_pi56_ulp(uint32_t a) {
 static int32_t sin_pi56_ulp(uint32_t a) {
     double ad    = posit_to_double(a);
     uint32_t p56 = posit32_sin_pi56(a);
-    double ex    = sin(3.14159265358979323846 * ad);
+    /* reduce mod 2 before computing reference -- same as sin_pi56 */
+    //double xd = ad - floor(ad / 2.0) * 2.0;
+    double xd = fmod(ad, 2.0);  /* fmod preserves precision; floor/int64 fail for large posit32 */
+    if (xd < 0.0) xd += 2.0;
+    double ex    = sin(3.14159265358979323846 * xd);
     double ref   = (fabs(ex) < 1e-15) ? 0.0 : ex;
     uint32_t pref = posit_from_double(ref);
     return (int32_t)p56 - (int32_t)pref;
