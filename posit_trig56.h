@@ -202,16 +202,6 @@ static uint32_t posit32_cos56(uint32_t a) {
  * haversine, ILS DDM. x=0.5 -> sin(pi/2)=1 exactly.
  * Large-angle: reduce x mod 2 in double before Q56 convert.   */
 
-static uint32_t posit32_sin_pi56(uint32_t x) {
-    double xd = posit_to_double(x);
-    /* reduce mod 2: sin(pi*(x+2)) = sin(pi*x) */
-    xd = xd - (int64_t)(xd / 2.0) * 2.0;
-    int64_t aq = (int64_t)(xd * 2.0 * (double)Q56_PI2);
-    int64_t c56, s56;
-    cordic56(aq, &c56, &s56);
-    return posit_from_double((double)s56 / Q56D);
-}
-
 static uint32_t posit32_cos_pi56(uint32_t x) {
     double xd = posit_to_double(x);
     int64_t c56, s56;
@@ -250,6 +240,14 @@ static uint32_t posit32_cos_pi56(uint32_t x) {
     return posit_from_double(neg ? -r : r);
 }
 
+static uint32_t posit32_sin_pi56(uint32_t x) {
+    /* sin(pi*x) = cos(pi*(x - 1/2))
+     * One quadrant, one trig function, everything else is geometry.
+     * Volder 1959. Gustafson 2026.                                  */
+    double xd = posit_to_double(x);
+    return posit32_cos_pi56(posit_from_double(xd - 0.5));
+}
+
 /* -- ULP error measurement ------------------------------------ */
 /* Compare posit32_sin56/cos56 against double reference.
  * Returns signed ULP distance in posit32 bit patterns.
@@ -278,6 +276,15 @@ static int32_t cos_pi56_ulp(uint32_t a) {
     double ad    = posit_to_double(a);
     uint32_t p56 = posit32_cos_pi56(a);
     double ex    = cos(3.14159265358979323846 * ad);
+    double ref   = (fabs(ex) < 1e-15) ? 0.0 : ex;
+    uint32_t pref = posit_from_double(ref);
+    return (int32_t)p56 - (int32_t)pref;
+}
+
+static int32_t sin_pi56_ulp(uint32_t a) {
+    double ad    = posit_to_double(a);
+    uint32_t p56 = posit32_sin_pi56(a);
+    double ex    = sin(3.14159265358979323846 * ad);
     double ref   = (fabs(ex) < 1e-15) ? 0.0 : ex;
     uint32_t pref = posit_from_double(ref);
     return (int32_t)p56 - (int32_t)pref;
