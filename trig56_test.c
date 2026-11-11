@@ -51,6 +51,19 @@ int main(void) {
                xs[i],rs,ex,fabs(rs-ex));
     }
 
+    printf("\ncos_pi56 test (Gustafson recommendation):\n");
+    double xc[] = {0.0,0.5,0.25,0.1,0.333333,1.0};
+    for(int i=0;i<6;i++){
+        uint32_t px=posit_from_double(xc[i]);
+        uint32_t pc=posit32_cos_pi56(px);
+        double rc=posit_to_double(pc);
+        double ex=cos(M_PI*xc[i]);
+        double ref = (fabs(ex) < 1e-15) ? 0.0 : ex;
+        int32_t ulp=(int32_t)pc-(int32_t)posit_from_double(ref);
+        printf("  cos_pi(%.4f)=%.8f (exp %.8f) err=%.2e ulp=%d %s\n",
+               xc[i],rc,ex,fabs(rc-ex),ulp,ulp==0?"PASS":"check");
+    }
+
     printf("\nULP summary (%d tests):\n",22);
     printf("  perfect (ulp=0): %d\n",perfect);
     printf("  off by 1 ulp:    %d\n",off1);

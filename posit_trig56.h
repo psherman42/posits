@@ -214,12 +214,40 @@ static uint32_t posit32_sin_pi56(uint32_t x) {
 
 static uint32_t posit32_cos_pi56(uint32_t x) {
     double xd = posit_to_double(x);
+    int64_t c56, s56;
+    int neg = 0;
+
     /* reduce mod 2: cos(pi*(x+2)) = cos(pi*x) */
     xd = xd - (int64_t)(xd / 2.0) * 2.0;
+    if (xd < 0) xd += 2.0;
+
+    /* symmetry reduction to [0, 1/2]
+     * cos(pi*x) for x in [0,2]:
+     *   [0,   1/2]: compute directly         sign=+
+     *   [1/2, 1  ]: cos(pi*x)=-cos(pi*(1-x)) sign=-
+     *   [1,   3/2]: cos(pi*x)=-cos(pi*(x-1)) sign=-
+     *   [3/2, 2  ]: cos(pi*x)= cos(pi*(2-x)) sign=+  */
+    if      (xd <= 0.5) { ;                 neg = 0; }
+    else if (xd <= 1.0) { xd = 1.0 - xd;    neg = 1; }
+    else if (xd <= 1.5) { xd = xd - 1.0;    neg = 1; }
+    else                { xd = 2.0 - xd;    neg = 0; }
+
+    /* exact: cos(pi/2) = 0 */
+    if (xd == 0.5) return posit_from_double(0.0);
+
+    /* near x=1/2: cos(pi*x) = sin(pi*eps), Taylor series */
+    double eps = 0.5 - xd;
+    if (eps >= 0 && eps < 9.5367e-7) {
+        double pie = 3.14159265358979323846 * eps;
+        double r = pie * (1.0 - pie*pie/6.0 + pie*pie*pie*pie/120.0);
+        return posit_from_double(neg ? -r : r);
+    }
+
+    /* main range [0, 1/2): use 56-bit CORDIC */
     int64_t aq = (int64_t)(xd * 2.0 * (double)Q56_PI2);
-    int64_t c56, s56;
     cordic56(aq, &c56, &s56);
-    return posit_from_double((double)c56 / Q56D);
+    double r = (double)c56 / Q56D;
+    return posit_from_double(neg ? -r : r);
 }
 
 /* -- ULP error measurement ------------------------------------ */
@@ -244,6 +272,15 @@ static int32_t cos56_ulp(uint32_t a) {
     uint32_t p56 = posit32_cos56(a);
     uint32_t ref = posit_from_double(cos(ad));
     return (int32_t)p56 - (int32_t)ref;
+}
+
+static int32_t cos_pi56_ulp(uint32_t a) {
+    double ad    = posit_to_double(a);
+    uint32_t p56 = posit32_cos_pi56(a);
+    double ex    = cos(3.14159265358979323846 * ad);
+    double ref   = (fabs(ex) < 1e-15) ? 0.0 : ex;
+    uint32_t pref = posit_from_double(ref);
+    return (int32_t)p56 - (int32_t)pref;
 }
 
 #endif /* POSIT_TRIG56_H */
