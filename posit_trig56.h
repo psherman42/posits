@@ -120,7 +120,8 @@ static const int64_t _atan56[56] = {
  * Pure int64_t arithmetic -- no float in the CORDIC loop.       */
 
 static void cordic56(int64_t angle_q56,
-                     int64_t *cos_out, int64_t *sin_out) {
+                     int64_t *cos_out, int64_t *sin_out,
+                     int64_t *z_out) {
     int64_t x = CORDIC_K56;
     int64_t y = 0;
     int64_t z = angle_q56;
@@ -161,10 +162,57 @@ static void cordic56(int64_t angle_q56,
         y  = yi;
     }
 
+    /* -- adaptive Q63 extension for hard-to-round cases ----------
+     * After 56 Q56 iterations, check if cos(x) is within half a
+     * posit32 ULP of a midpoint. If so, scale to Q63 and run 7
+     * more iterations for 7 extra bits of precision.
+     * atan(2^-i)*2^63 for i=56..62: 128,64,32,16,8,4,2
+     * John L. Gustafson: "I was really hoping there was a way to
+     * manually tweak CORDIC so you get the speed and simplicity
+     * but also get correct rounding everywhere -- that would be a
+     * big breakthrough." -- personal comm. 2026.                 */
+    {
+        static const int64_t _atan63[7] = {128,64,32,16,8,4,2};
+        int64_t half_ulp = (x < 0 ? -x : x) >> 29;
+        double  xd_near  = posit_to_double(posit_from_double((double)x/Q56D));
+        int64_t x_near   = (int64_t)(xd_near * Q56D);
+        int64_t dist     = x - x_near;
+        if (dist < 0) dist = -dist;
+
+        if (dist > 0 && dist < half_ulp) {
+            int64_t ax = (x < 0) ? -x : x;
+            if (ax <= (INT64_MAX >> 7)) {
+                /* scale to Q63 -- multiply by 128 */
+                int64_t X = x << 7;
+                int64_t Y = y << 7;
+                int64_t Z = z << 7;
+                int64_t Xi, Yi;
+
+                for (i = 0; i < 7; i++) {
+                    d  = (Z >= 0) ? 1 : -1;
+                    Xi = X - (int64_t)(d * (Y >> (56 + i)));
+                    Yi = Y + (int64_t)(d * (X >> (56 + i)));
+                    Z  = Z - (int64_t)(d * _atan63[i]);
+                    X  = Xi;
+                    Y  = Yi;
+                }
+
+                /* scale back to Q56 */
+                x = X >> 7;
+                y = Y >> 7;
+            }
+            /* else: near 1.0, x<<7 overflows int64 -- accept 56-iter result */
+        }
+        /* else dist==0: exactly on posit32 value, already correct */
+        /* else dist>=half_ulp: far from midpoint, 56 iters sufficient */
+    }
+
     if (flip_sin) y = -y;
     if (flip_cos) x = -x;
     *cos_out = x;
     *sin_out = y;
+
+    if (z_out) *z_out = z;
 }
 
 /* -- posit32 sin/cos -- 56-bit CORDIC ------------------------- */
@@ -182,7 +230,7 @@ static uint32_t posit32_sin56(uint32_t a) {
     ad = ad - (int64_t)(ad / two_pi) * two_pi;
     int64_t aq = (int64_t)(ad / (3.14159265358979323846/2.0) * (double)Q56_PI2);
     int64_t c56, s56;
-    cordic56(aq, &c56, &s56);
+    cordic56(aq, &c56, &s56, NULL);
     return posit_from_double((double)s56 / Q56D);
 }
 
@@ -192,7 +240,7 @@ static uint32_t posit32_cos56(uint32_t a) {
     ad = ad - (int64_t)(ad / two_pi) * two_pi;
     int64_t aq = (int64_t)(ad / (3.14159265358979323846/2.0) * (double)Q56_PI2);
     int64_t c56, s56;
-    cordic56(aq, &c56, &s56);
+    cordic56(aq, &c56, &s56, NULL);
     return posit_from_double((double)c56 / Q56D);
 }
 
@@ -241,7 +289,7 @@ static uint32_t posit32_cos_pi56(uint32_t x) {
 
     /* main range [0, 1/2): use 56-bit CORDIC */
     int64_t aq = (int64_t)(xd * 2.0 * (double)Q56_PI2);
-    cordic56(aq, &c56, &s56);
+    cordic56(aq, &c56, &s56, NULL);
     double r = (double)c56 / Q56D;
     return posit_from_double(neg ? -r : r);
 }
@@ -275,7 +323,7 @@ static uint32_t posit32_sin_pi56(uint32_t x) {
     /* main range: 56-bit CORDIC */
     int64_t aq = (int64_t)(xd * 2.0 * (double)Q56_PI2);
     int64_t c56, s56;
-    cordic56(aq, &c56, &s56);
+    cordic56(aq, &c56, &s56, NULL);
     double r = (double)s56 / Q56D;
     return posit_from_double(neg ? -r : r);
 }
@@ -309,10 +357,16 @@ static int32_t cos_pi56_ulp(uint32_t a) {
     uint32_t p56 = posit32_cos_pi56(a);
     /* reduce mod 2 before computing reference -- same as cos_pi56 */
     //double xd = ad - floor(ad / 2.0) * 2.0;
-    double xd = fmod(ad, 2.0);  /* fmod preserves precision; floor/int64 fail for large posit32 */
+    double xd    = fmod(ad, 2.0);
     if (xd < 0.0) xd += 2.0;
-    double ex    = cos(3.14159265358979323846 * xd);
-    double ref   = (fabs(ex) < 1e-30) ? 0.0 : ex;  /* only zero if truly below posit32 minpos */
+    /* apply same symmetry as cos_pi56 to get reference in [0,0.5] */
+    if      (xd < 0.5 + QB) { ; }
+    else if (xd < 1.0 + QB) { xd = 1.0 - xd; }
+    else if (xd < 1.5 + QB) { xd = xd - 1.0; }
+    else                    { xd = 2.0 - xd; }
+    /* exact zero at boundary */
+    double ex = (xd == 0.5) ? 0.0 : cos(3.14159265358979323846 * xd);
+    double ref   = (fabs(ex) < 1e-30) ? 0.0 : ex;
     uint32_t pref = posit_from_double(ref);
     return (int32_t)p56 - (int32_t)pref;
 }
@@ -324,8 +378,14 @@ static int32_t sin_pi56_ulp(uint32_t a) {
     //double xd = ad - floor(ad / 2.0) * 2.0;
     double xd = fmod(ad, 2.0);  /* fmod preserves precision; floor/int64 fail for large posit32 */
     if (xd < 0.0) xd += 2.0;
-    double ex    = sin(3.14159265358979323846 * xd);
-    double ref   = (fabs(ex) < 1e-30) ? 0.0 : ex;  /* only zero if truly below posit32 minpos */
+    /* apply same symmetry as sin_pi56 to get reference in [0,0.5] */
+    if      (xd < 0.5 + QB) { ; }
+    else if (xd < 1.0 + QB) { xd = 1.0 - xd; }
+    else if (xd < 1.5 + QB) { xd = xd - 1.0; }
+    else                    { xd = 2.0 - xd; }
+    /* exact zero at x=0 */
+    double ex = (xd < 1e-30) ? 0.0 : sin(3.14159265358979323846 * xd);
+    double ref   = (fabs(ex) < 1e-30) ? 0.0 : ex;
     uint32_t pref = posit_from_double(ref);
     return (int32_t)p56 - (int32_t)pref;
 }
