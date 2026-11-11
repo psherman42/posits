@@ -202,6 +202,11 @@ static uint32_t posit32_cos56(uint32_t a) {
  * haversine, ILS DDM. x=0.5 -> sin(pi/2)=1 exactly.
  * Large-angle: reduce x mod 2 in double before Q56 convert.   */
 
+/* QB: fuzzy quadrant boundary guard.
+ * fmod() can land just above exact values (0.5, 1.0, 1.5) by ~1e-15.
+ * Uniform guard on all boundaries -- symmetric, honest about float limits. */
+#define QB 1e-10
+
 static uint32_t posit32_cos_pi56(uint32_t x) {
     double xd = posit_to_double(x);
     int64_t c56, s56;
@@ -218,17 +223,17 @@ static uint32_t posit32_cos_pi56(uint32_t x) {
      *   [1/2, 1  ]: cos(pi*x)=-cos(pi*(1-x)) sign=-
      *   [1,   3/2]: cos(pi*x)=-cos(pi*(x-1)) sign=-
      *   [3/2, 2  ]: cos(pi*x)= cos(pi*(2-x)) sign=+  */
-    if      (xd <= 0.5) { ;                 neg = 0; }
-    else if (xd <= 1.0) { xd = 1.0 - xd;    neg = 1; }
-    else if (xd <= 1.5) { xd = xd - 1.0;    neg = 1; }
-    else                { xd = 2.0 - xd;    neg = 0; }
+    if      (xd < 0.5 + QB) { ;               neg = 0; }  /* Q1 */
+    else if (xd < 1.0 + QB) { xd = 1.0 - xd;  neg = 1; }  /* Q2 */
+    else if (xd < 1.5 + QB) { xd = xd - 1.0;  neg = 1; }  /* Q3 */
+    else                    { xd = 2.0 - xd;  neg = 0; }  /* Q4 */
 
     /* exact: cos(pi/2) = 0 */
     if (xd == 0.5) return posit_from_double(0.0);
 
     /* near x=1/2: cos(pi*x) = sin(pi*eps), Taylor series */
     double eps = 0.5 - xd;
-    if (eps >= 0 && eps < 9.5367e-7) {
+    if (eps >= 0 && eps < 0.044) {  /* Taylor: (pi*eps)^7/5040 < 2^-28 for eps < 0.138/pi = 0.044 */
         double pie = 3.14159265358979323846 * eps;
         double r = pie * (1.0 - pie*pie/6.0 + pie*pie*pie*pie/120.0);
         return posit_from_double(neg ? -r : r);
@@ -243,15 +248,36 @@ static uint32_t posit32_cos_pi56(uint32_t x) {
 
 static uint32_t posit32_sin_pi56(uint32_t x) {
     double xd = posit_to_double(x);
-    /* sin(pi*x) = cos(pi*(x - 1/2))
-     * One quadrant, one trig function, everything else is geometry.
-     * Volder 1959. Gustafson 2026.
-     * Reduce mod 2 BEFORE shifting -- precision loss at large posit32
-     * values where xd-0.5 loses the 0.5 entirely.                   */
-    //xd = xd - floor(xd / 2.0) * 2.0;
-    xd = fmod(xd, 2.0);  /* fmod preserves precision; floor/int64 fail for large posit32 */
+    int neg = 0;
+
+    xd = fmod(xd, 2.0);
     if (xd < 0.0) xd += 2.0;
-    return posit32_cos_pi56(posit_from_double(xd - 0.5));
+
+    /* symmetry reduction to [0, 1/2]
+     * sin(pi*x) for x in [0,2]:
+     *   [0,   1/2]: compute directly         neg=0
+     *   [1/2,   1]: sin(pi*x)= sin(pi*(1-x)) neg=0
+     *   [1,   3/2]: sin(pi*x)=-sin(pi*(x-1)) neg=1
+     *   [3/2,   2]: sin(pi*x)=-sin(pi*(2-x)) neg=1  */
+    if      (xd < 0.5 + QB) { ;               neg = 0; }
+    else if (xd < 1.0 + QB) { xd = 1.0 - xd;  neg = 0; }
+    else if (xd < 1.5 + QB) { xd = xd - 1.0;  neg = 1; }
+    else                    { xd = 2.0 - xd;  neg = 1; }
+
+    /* near x=0: sin(pi*x) ≈ pi*x -- Taylor series
+     * accurate to posit32 ULP for x < 0.044               */
+    if (xd < 0.044) {
+        double pix = 3.14159265358979323846 * xd;
+        double r = pix * (1.0 - pix*pix/6.0 + pix*pix*pix*pix/120.0);
+        return posit_from_double(neg ? -r : r);
+    }
+
+    /* main range: 56-bit CORDIC */
+    int64_t aq = (int64_t)(xd * 2.0 * (double)Q56_PI2);
+    int64_t c56, s56;
+    cordic56(aq, &c56, &s56);
+    double r = (double)s56 / Q56D;
+    return posit_from_double(neg ? -r : r);
 }
 
 /* -- ULP error measurement ------------------------------------ */
@@ -286,7 +312,7 @@ static int32_t cos_pi56_ulp(uint32_t a) {
     double xd = fmod(ad, 2.0);  /* fmod preserves precision; floor/int64 fail for large posit32 */
     if (xd < 0.0) xd += 2.0;
     double ex    = cos(3.14159265358979323846 * xd);
-    double ref   = (fabs(ex) < 1e-15) ? 0.0 : ex;
+    double ref   = (fabs(ex) < 1e-30) ? 0.0 : ex;  /* only zero if truly below posit32 minpos */
     uint32_t pref = posit_from_double(ref);
     return (int32_t)p56 - (int32_t)pref;
 }
@@ -299,7 +325,7 @@ static int32_t sin_pi56_ulp(uint32_t a) {
     double xd = fmod(ad, 2.0);  /* fmod preserves precision; floor/int64 fail for large posit32 */
     if (xd < 0.0) xd += 2.0;
     double ex    = sin(3.14159265358979323846 * xd);
-    double ref   = (fabs(ex) < 1e-15) ? 0.0 : ex;
+    double ref   = (fabs(ex) < 1e-30) ? 0.0 : ex;  /* only zero if truly below posit32 minpos */
     uint32_t pref = posit_from_double(ref);
     return (int32_t)p56 - (int32_t)pref;
 }
