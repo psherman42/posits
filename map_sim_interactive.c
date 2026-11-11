@@ -4,18 +4,21 @@
  * Renders the 128x64 OLED map as ASCII art in the terminal.
  * Keyboard controls mirror the FE310 button interface.
  *
- * Controls:
- *   +/=  : zoom in  (BTN_B short)
- *   -    : zoom out (BTN_B long)
- *   w/k  : pan North
- *   s/j  : pan South
- *   d/l  : pan East
- *   a/h  : pan West
- *   m    : cycle modes TRACK/PAN/ROUTE
- *   W    : set waypoint at current GPS position
- *   g    : goto -- map_goto nearest waypoint
- *   r    : reset view to neighborhood
- *   q    : quit
+ * Usage:
+ *   n/p      : walk forward/backward along simulated GPS track
+ *   m        : cycle modes
+ *                TRACK -- view follows GPS dot, zoom persists
+ *                PAN   -- free pan with hjkl or wasd, dot stays visible
+ *                ROUTE -- auto-scales to show all waypoints + track
+ *   +/-      : zoom in/out (persists across mode changes)
+ *   wasd     : pan N/S/E/W (gamer style)
+ *   hjkl     : pan W/S/N/E (vim style)
+ *   W        : plant waypoint at current GPS position
+ *   G        : add Golden Gate Bridge waypoint
+ *   C        : add Chicago waypoint
+ *   g        : goto first waypoint
+ *   r        : reset to neighborhood
+ *   q        : quit
  *
  * GPS points: San Jose neighborhood walk, 2026-11-08 pds
  *   A: 37.40058, -121.92571  (start)
