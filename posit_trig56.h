@@ -173,7 +173,10 @@ static void cordic56(int64_t angle_q56,
      * big breakthrough." -- personal comm. 2026.                 */
     {
         static const int64_t _atan63[7] = {128,64,32,16,8,4,2};
-        int64_t half_ulp = (x < 0 ? -x : x) >> 29;
+        /* exact posit32 ULP in Q56 units */
+        uint32_t px = posit_from_double((double)x / Q56D);
+        double ulp_d = posit_to_double(px+1) - posit_to_double(px);
+        int64_t half_ulp = (int64_t)(ulp_d * Q56D / 2.0);
         double  xd_near  = posit_to_double(posit_from_double((double)x/Q56D));
         int64_t x_near   = (int64_t)(xd_near * Q56D);
         int64_t dist     = x - x_near;
@@ -181,7 +184,10 @@ static void cordic56(int64_t angle_q56,
 
         if (dist > 0 && dist < half_ulp) {
             int64_t ax = (x < 0) ? -x : x;
-            if (ax <= (INT64_MAX >> 7)) {
+            int64_t ay = (y < 0) ? -y : y;
+            /* guard: both x<<7 and y<<7 must fit in int64 
+             * y≈Q56D near sin=1 would overflow without this check */
+            if (ax <= (INT64_MAX >> 7) && ay <= (INT64_MAX >> 7)) {
                 /* scale to Q63 -- multiply by 128 */
                 int64_t X = x << 7;
                 int64_t Y = y << 7;
@@ -279,11 +285,29 @@ static uint32_t posit32_cos_pi56(uint32_t x) {
     /* exact: cos(pi/2) = 0 */
     if (xd == 0.5) return posit_from_double(0.0);
 
-    /* near x=1/2: cos(pi*x) = sin(pi*eps), Taylor series */
+    /* near x=1/2: cos(pi*x) = sin(pi*eps), Taylor series
+     * accurate to posit32 ULP for eps < 0.044
+     * adaptive extension: if result lands near posit32 midpoint,
+     * add terms 7 and 9 for extra precision -- mirrors Q63 in CORDIC */
     double eps = 0.5 - xd;
     if (eps >= 0 && eps < 0.044) {  /* Taylor: (pi*eps)^7/5040 < 2^-28 for eps < 0.138/pi = 0.044 */
-        double pie = 3.14159265358979323846 * eps;
-        double r = pie * (1.0 - pie*pie/6.0 + pie*pie*pie*pie/120.0);
+        double pie  = 3.14159265358979323846 * eps;
+        double pie2 = pie * pie;
+        double r = pie * (1.0 - pie2/6.0 + pie2*pie2/120.0);
+
+        /* proximity check -- same philosophy as Q63 CORDIC extension */
+        double rn   = neg ? -r : r;
+        double near = posit_to_double(posit_from_double(rn));
+        double dist = rn - near;
+        if (dist < 0.0) dist = -dist;
+        uint32_t pn = posit_from_double(near < 0 ? -near : near);
+        double half_ulp = (posit_to_double(pn + 1) - posit_to_double(pn)) / 2.0;
+
+        if (dist > 0.0 && dist < half_ulp) {
+            /* add Taylor terms 7 and 9 */
+            r += pie * pie2 * pie2 * pie2 * (-1.0/5040.0 + pie2/362880.0);
+        }
+
         return posit_from_double(neg ? -r : r);
     }
 
@@ -326,7 +350,8 @@ static uint32_t posit32_sin_pi56(uint32_t x) {
         double near = posit_to_double(posit_from_double(rn));
         double dist = rn - near;
         if (dist < 0.0) dist = -dist;
-        double half_ulp = (near < 0 ? -near : near) * 3.725e-9; /* 2^-28 */
+        uint32_t pn = posit_from_double(near < 0 ? -near : near);
+        double half_ulp = (posit_to_double(pn + 1) - posit_to_double(pn)) / 2.0;
 
         if (dist > 0.0 && dist < half_ulp) {
             /* add Taylor terms 7 and 9 */
