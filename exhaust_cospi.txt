@@ -14,12 +14,12 @@ Pioneer SG2042, 64-hart RV64GC
 
 Results:
   total inputs:    2147483648
-  perfect (ulp=0): 2138313159 (99.5730%)
-  off by 1:        4976185
+  perfect (ulp=0): 2147483454 (100.0000%)
+  off by 1:        194
   off by 2:        0
-  worse:           4194304
-  worst ulp:       125413 at p=0x44000000 (a=1.500000)
-  wall time:       184.7 sec (3.1 min)
-  throughput:      11.6M inputs/sec
+  worse:           0
+  worst ulp:       1 at p=0x2ddac692 (a=0.216478)
+  wall time:       404.2 sec (6.7 min)
+  throughput:      5.3M inputs/sec
 
-9170489 failures -- Table-Maker strategies needed.
+194 failures -- Table-Maker strategies needed.
