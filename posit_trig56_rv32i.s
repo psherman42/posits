@@ -112,11 +112,74 @@ _atan56_rv32i:
 #   # z positive: xi=x-(y>>i), yi=y+(x>>i), z-=atan[i]
 #   ...
 
-	.globl cordic56_rv32i
-cordic56_rv32i:
-	# stub -- returns immediately
-	# full implementation: next session
-	ret
+# cordic56_rv32i_iter0 -- one CORDIC iteration for i=0
+# 2026-11-12 pds  first real iteration -- RV32I 64-bit add/sub/sign
+#
+# Register convention (maintained across all iterations):
+#   s0:s1  = x hi:lo
+#   s2:s3  = y hi:lo
+#   s4:s5  = z hi:lo
+#   a0:a1  = atan[i] hi:lo (caller loads before each iteration)
+#
+# i=0: no shift needed (y>>0 = y, x>>0 = x)
+#
+# d = sign(z): if z>=0, d=+1 else d=-1
+# x_new = x - d*(y>>i)
+# y_new = y + d*(x>>i)
+# z_new = z - d*atan[i]
+
+        .globl cordic56_rv32i_iter0
+cordic56_rv32i_iter0:
+        # t4 = 1 if z negative, 0 if positive
+        slt   t4, s4, x0
+
+        # save x_orig for y update
+        mv    t5, s1             # x_orig_lo
+        mv    t6, s0             # x_orig_hi
+
+        beqz  t4, .i0_pos
+
+.i0_neg:
+        # d = -1: x += y, y -= x_orig, z += atan
+        # 64-bit x += y
+        add   s1, s1, s3
+        sltu  t0, s1, s3         # carry
+        add   s0, s0, s2
+        add   s0, s0, t0
+
+        # 64-bit y -= x_orig (borrow BEFORE sub)
+        sltu  t0, s3, t5         # borrow = (y_lo < x_lo)
+        sub   s3, s3, t5
+        sub   s2, s2, t6
+        sub   s2, s2, t0         # - borrow
+
+        # 64-bit z += atan
+        add   s5, s5, a1
+        sltu  t0, s5, a1         # carry
+        add   s4, s4, a0
+        add   s4, s4, t0
+        ret
+
+.i0_pos:
+        # d = +1: x -= y, y += x_orig, z -= atan
+        # 64-bit x -= y (borrow BEFORE sub)
+        sltu  t0, s1, s3         # borrow = (x_lo < y_lo)
+        sub   s1, s1, s3
+        sub   s0, s0, s2
+        sub   s0, s0, t0         # - borrow
+
+        # 64-bit y += x_orig
+        add   s3, s3, t5
+        sltu  t0, s3, t5         # carry
+        add   s2, s2, t6
+        add   s2, s2, t0
+
+        # 64-bit z -= atan (borrow BEFORE sub)
+        sltu  t0, s5, a1         # borrow = (z_lo < atan_lo)
+        sub   s5, s5, a1
+        sub   s4, s4, a0
+        sub   s4, s4, t0         # - borrow
+        ret
 
 	.globl posit32_sin56_rv32i
 posit32_sin56_rv32i:
@@ -127,3 +190,73 @@ posit32_sin56_rv32i:
 posit32_cos56_rv32i:
 	# stub
 	ret
+
+# test wrapper -- calls iter0 directly (same file, no relocation needed)
+        .globl cordic56_rv32i_iter0_test
+cordic56_rv32i_iter0_test:
+        addi  sp, sp, -88
+        sd    s0,  0(sp)
+        sd    s1,  8(sp)
+        sd    s2, 16(sp)
+        sd    s3, 24(sp)
+        sd    s4, 32(sp)
+        sd    s5, 40(sp)
+        sd    s6, 48(sp)
+        sd    s7, 56(sp)
+        sd    s8, 64(sp)
+        sd    ra, 72(sp)
+
+        srli  s0, a0, 32
+        slli  s1, a0, 32
+        srli  s1, s1, 32
+
+        srli  s2, a1, 32
+        slli  s3, a1, 32
+        srli  s3, s3, 32
+
+        srli  s4, a2, 32
+        slli  s5, a2, 32
+        srli  s5, s5, 32
+
+        srli  t0, a3, 32
+        slli  t1, a3, 32
+        srli  t1, t1, 32
+        mv    a0, t0
+        mv    a1, t1
+
+        mv    s6, a4
+        mv    s7, a5
+        mv    s8, a6
+
+        jal   ra, cordic56_rv32i_iter0
+
+        slli  t5, s0, 32         # hi to upper 32
+        slli  t6, s1, 32         # lo to upper 32
+        srli  t6, t6, 32         # lo back to lower 32, zero-extended
+        or    t5, t5, t6
+        sd    t5, 0(s6)
+
+        slli  t5, s2, 32         # hi to upper 32
+        slli  t6, s3, 32         # lo to upper 32
+        srli  t6, t6, 32         # lo back to lower 32, zero-extended
+        or    t5, t5, t6
+        sd    t5, 0(s7)
+
+        slli  t5, s4, 32         # hi to upper 32
+        slli  t6, s5, 32         # lo to upper 32
+        srli  t6, t6, 32         # lo back to lower 32, zero-extended
+        or    t5, t5, t6
+        sd    t5, 0(s8)
+
+        ld    s0,  0(sp)
+        ld    s1,  8(sp)
+        ld    s2, 16(sp)
+        ld    s3, 24(sp)
+        ld    s4, 32(sp)
+        ld    s5, 40(sp)
+        ld    s6, 48(sp)
+        ld    s7, 56(sp)
+        ld    s8, 64(sp)
+        ld    ra, 72(sp)
+        addi  sp, sp, 88
+        ret
