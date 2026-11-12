@@ -223,11 +223,109 @@ cordic56_rv32i_iter0:
         sub   s4, s4, t0         # - borrow
         ret
 
+# cordic56_rv32i_iter -- general CORDIC iteration for any i
+# 2026-11-12 pds
+#
+# Inputs (maintained by caller):
+#   s0:s1  = x hi:lo
+#   s2:s3  = y hi:lo
+#   s4:s5  = z hi:lo
+#   s6     = i (iteration number, 0..55)
+#   a0:a1  = atan[i] hi:lo
+#
+# Uses ra -- caller must save ra if needed
+# Clobbers: t0-t6, a0-a2
+
+        .globl cordic56_rv32i_iter
+cordic56_rv32i_iter:
+        addi  sp, sp, -24
+        sd    ra, 0(sp)
+        sd    a0, 8(sp)          # save atan_hi (shift clobbers a0)
+        sd    a1, 16(sp)         # save atan_lo
+
+        # compute y >> i -> s7:s8
+        mv    a0, s2             # y_hi
+        mv    a1, s3             # y_lo
+        mv    a2, s6             # i
+        jal   ra, cordic56_rv32i_shift
+        mv    s7, t2             # y>>i hi
+        mv    s8, t3             # y>>i lo
+
+        # compute x >> i -> t2:t3 (used directly below)
+        mv    a0, s0             # x_hi
+        mv    a1, s1             # x_lo
+        mv    a2, s6             # i
+        jal   ra, cordic56_rv32i_shift
+        # t2:t3 = x>>i hi:lo
+
+        # restore atan and determine sign of z
+        ld    a0, 8(sp)          # restore atan_hi
+        ld    a1, 16(sp)         # restore atan_lo
+        slt   t4, s4, x0         # t4 = 1 if z negative
+
+        # save x_orig for y update
+        mv    t5, s1             # x_orig_lo
+        mv    t6, s0             # x_orig_hi
+
+        # .iter_neg and .iter_pos are mirror images:
+        # neg: x+=, y-=, z+=  (d=-1, rotate clockwise)
+        # pos: x-=, y+=, z-=  (d=+1, rotate counterclockwise)
+        # add/carry <-> sub/borrow throughout
+
+        beqz  t4, .iter_pos
+
+.iter_neg:
+        # d=-1: x += y>>i, y -= x>>i, z += atan
+        add   s1, s1, s8         # x_lo += (y>>i)_lo
+        sltu  t0, s1, s8         # carry
+        add   s0, s0, s7         # x_hi += (y>>i)_hi
+        add   s0, s0, t0         # + carry
+
+        sltu  t0, s3, t3         # borrow (y_lo < (x>>i)_lo)
+        sub   s3, s3, t3         # y_lo -= (x>>i)_lo
+        sub   s2, s2, t2         # y_hi -= (x>>i)_hi
+        sub   s2, s2, t0         # - borrow
+
+        add   s5, s5, a1         # z_lo += atan_lo
+        sltu  t0, s5, a1         # carry
+        add   s4, s4, a0         # z_hi += atan_hi
+        add   s4, s4, t0         # + carry
+
+        ld    ra, 0(sp)
+        addi  sp, sp, 24
+        ret
+
+.iter_pos:
+        # d=+1: x -= y>>i, y += x>>i, z -= atan
+        sltu  t0, s1, s8         # borrow (x_lo < (y>>i)_lo)
+        sub   s1, s1, s8         # x_lo -= (y>>i)_lo
+        sub   s0, s0, s7         # x_hi -= (y>>i)_hi
+        sub   s0, s0, t0         # - borrow
+
+        add   s3, s3, t3         # y_lo += (x>>i)_lo  ← t3 not t2
+        sltu  t0, s3, t3         # carry
+        add   s2, s2, t2         # y_hi += (x>>i)_hi  ← t2 not t3
+        add   s2, s2, t0
+
+        sltu  t0, s5, a1
+        sub   s5, s5, a1
+        sub   s4, s4, a0
+        sub   s4, s4, t0
+
+        ld    ra, 0(sp)
+        addi  sp, sp, 24
+        ret
+
+
+# posit32_sin56_rv32i -- ...
+# 2026-11-11 pds
 	.globl posit32_sin56_rv32i
 posit32_sin56_rv32i:
 	# stub
 	ret
 
+# posit32_cos56_rv32i -- ...
+# 2026-11-11 pds
 	.globl posit32_cos56_rv32i
 posit32_cos56_rv32i:
 	# stub
@@ -330,5 +428,91 @@ cordic56_rv32i_shift_test:
         ld    ra, 0(sp)
         ld    t6, 8(sp)
         addi  sp, sp, 16
+        ret
+
+# iter_test wrapper -- RV64 test scaffolding only
+# C signature:
+#   void cordic56_rv32i_iter_test(
+#       int64_t x_in, int64_t y_in, int64_t z_in,
+#       int64_t atan_in, int32_t i,
+#       int64_t *x_out, int64_t *y_out, int64_t *z_out)
+# RV64 ABI: a0=x, a1=y, a2=z, a3=atan, a4=i, a5=x_out, a6=y_out, a7=z_out
+
+        .globl cordic56_rv32i_iter_test
+cordic56_rv32i_iter_test:
+        addi  sp, sp, -112
+        sd    s0,   0(sp)
+        sd    s1,   8(sp)
+        sd    s2,  16(sp)
+        sd    s3,  24(sp)
+        sd    s4,  32(sp)
+        sd    s5,  40(sp)
+        sd    s6,  48(sp)
+        sd    s7,  56(sp)
+        sd    s8,  64(sp)
+        sd    ra,  72(sp)
+        sd    a5,  80(sp)        # x_out
+        sd    a6,  88(sp)        # y_out
+        sd    a7,  96(sp)        # z_out
+
+        # split x (a0) into s0:s1 hi:lo
+        srai  s0, a0, 32
+        slli  s1, a0, 32
+        srli  s1, s1, 32
+
+        # split y (a1) into s2:s3
+        srai  s2, a1, 32
+        slli  s3, a1, 32
+        srli  s3, s3, 32
+
+        # split z (a2) into s4:s5
+        srai  s4, a2, 32
+        slli  s5, a2, 32
+        srli  s5, s5, 32
+
+        # split atan (a3) into a0:a1
+        srai  t0, a3, 32
+        slli  a1, a3, 32
+        srli  a1, a1, 32
+        mv    a0, t0
+
+        # i into s6
+        mv    s6, a4
+
+        jal   ra, cordic56_rv32i_iter
+
+        # reassemble and store results
+        ld    t0, 80(sp)         # x_out ptr
+        slli  t5, s0, 32
+        slli  t6, s1, 32
+        srli  t6, t6, 32
+        or    t5, t5, t6
+        sd    t5, 0(t0)
+
+        ld    t0, 88(sp)         # y_out ptr
+        slli  t5, s2, 32
+        slli  t6, s3, 32
+        srli  t6, t6, 32
+        or    t5, t5, t6
+        sd    t5, 0(t0)
+
+        ld    t0, 96(sp)         # z_out ptr
+        slli  t5, s4, 32
+        slli  t6, s5, 32
+        srli  t6, t6, 32
+        or    t5, t5, t6
+        sd    t5, 0(t0)
+
+        ld    s0,   0(sp)
+        ld    s1,   8(sp)
+        ld    s2,  16(sp)
+        ld    s3,  24(sp)
+        ld    s4,  32(sp)
+        ld    s5,  40(sp)
+        ld    s6,  48(sp)
+        ld    s7,  56(sp)
+        ld    s8,  64(sp)
+        ld    ra,  72(sp)
+        addi  sp, sp, 112
         ret
 
