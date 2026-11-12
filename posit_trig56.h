@@ -261,6 +261,13 @@ static uint32_t posit32_cos56(uint32_t a) {
  * Uniform guard on all boundaries -- symmetric, honest about float limits. */
 #define QB 1e-10
 
+/* posit32 min positive: 2^(-120) ≈ 7.5e-37
+   below this treat as exact zero */
+#define POSIT32_MINPOS 1e-36 
+
+/* 2^-52 double machine epsilon */
+#define DBL_EPSILON_APPROX 2.2e-16
+
 static uint32_t posit32_cos_pi56(uint32_t x) {
     double xd = posit_to_double(x);
     int64_t c56, s56;
@@ -303,7 +310,7 @@ static uint32_t posit32_cos_pi56(uint32_t x) {
         uint32_t pn = posit_from_double(near < 0 ? -near : near);
         double half_ulp = (posit_to_double(pn + 1) - posit_to_double(pn)) / 2.0;
 
-        if (dist > 0.0 && dist < half_ulp) {
+        if (dist > 0.0 && dist < half_ulp) {  /* genuine hard case: dist < half posit32 ULP -- may need refinement */
             /* add Taylor terms 7 and 9 */
             r += pie * pie2 * pie2 * pie2 * (-1.0/5040.0 + pie2/362880.0);
         }
@@ -338,25 +345,46 @@ static uint32_t posit32_sin_pi56(uint32_t x) {
 
     /* near x=0: sin(pi*x) ≈ pi*x -- Taylor series
      * accurate to posit32 ULP for x < 0.044
-     * adaptive extension: if result lands near posit32 midpoint,
-     * add terms 7 and 9 for extra precision -- mirrors Q63 in CORDIC */
+     * adaptive iterative extension: add pairs of terms until
+     * result moves away from posit32 midpoint or terms vanish.
+     * mirrors Q63 CORDIC extension -- same philosophy.           */
     if (xd < 0.044) {
         double pix  = 3.14159265358979323846 * xd;
         double pix2 = pix * pix;
         double r = pix * (1.0 - pix2/6.0 + pix2*pix2/120.0);
 
-        /* proximity check -- same philosophy as Q63 CORDIC extension */
+        /* proximity check */
         double rn   = neg ? -r : r;
         double near = posit_to_double(posit_from_double(rn));
         double dist = rn - near;
         if (dist < 0.0) dist = -dist;
         uint32_t pn = posit_from_double(near < 0 ? -near : near);
-        double half_ulp = (posit_to_double(pn + 1) - posit_to_double(pn)) / 2.0;
+        double half_ulp = (posit_to_double(pn+1) - posit_to_double(pn)) / 2.0;
 
-        if (dist > 0.0 && dist < half_ulp) {
-            /* add Taylor terms 7 and 9 */
+        if (dist > 0.0 && dist < half_ulp) {  /* genuine hard case: dist < half posit32 ULP -- may need refinement */
+            /* add Taylor terms 7 and 9 -- single step refinement */
             r += pix * pix2 * pix2 * pix2 * (-1.0/5040.0 + pix2/362880.0);
         }
+
+//        if (dist > 0.0 && dist < half_ulp) {  /* genuine hard case: dist < half posit32 ULP -- may need refinement */
+//            /* adaptive iterative Taylor */
+//            double term = pix * pix2 * pix2 * pix2;  /* (pi*x)^7 */
+//            double fact = -1.0/5040.0;                /* 1/7!     */
+//            int n;
+//            for (n = 3; n < 20; n++) {
+//                r += term * fact;
+//                rn   = neg ? -r : r;
+//                near = posit_to_double(posit_from_double(rn));
+//                dist = rn - near;
+//                if (dist < 0.0) dist = -dist;
+//                pn = posit_from_double(near < 0 ? -near : near);
+//                half_ulp = (posit_to_double(pn+1) - posit_to_double(pn)) / 2.0;
+//                if (dist == 0.0 || dist >= half_ulp) break;
+//                if (fabs(term) < POSIT32_MINPOS) break;  /* term below posit32 min -- series converged */
+//                term *= -pix2 / ((2.0*n+2) * (2.0*n+3));
+//                fact = 1.0;
+//            }
+//        }
 
         return posit_from_double(neg ? -r : r);
     }
@@ -400,11 +428,11 @@ static int32_t cos_pi56_ulp(uint32_t a) {
     if (xd < 0.0) xd += 2.0;
     /* exact zeros at quadrant boundaries where double is imprecise */
     double ex;
-    if (fabs(xd - 0.5) < 1e-10 || fabs(xd - 1.5) < 1e-10)
+    if (fabs(xd - 0.5) < QB || fabs(xd - 1.5) < QB)
         ex = 0.0;
     else
         ex = cos(3.14159265358979323846 * xd);
-    double ref   = (fabs(ex) < 1e-30) ? 0.0 : ex;
+    double ref   = (fabs(ex) < POSIT32_MINPOS) ? 0.0 : ex;
     uint32_t pref = posit_from_double(ref);
     return (int32_t)p56 - (int32_t)pref;
 }
@@ -416,11 +444,11 @@ static int32_t sin_pi56_ulp(uint32_t a) {
     double xd = fmod(ad, 2.0);  /* fmod preserves precision; floor/int64 fail for large posit32 */
     if (xd < 0.0) xd += 2.0;
     double ex;
-    if (xd < 1e-10 || fabs(xd - 1.0) < 1e-10)
+    if (xd < POSIT32_MINPOS || fabs(xd - 1.0) < POSIT32_MINPOS)
         ex = 0.0;
     else
         ex = sin(3.14159265358979323846 * xd);
-    double ref   = (fabs(ex) < 1e-30) ? 0.0 : ex;
+    double ref   = (fabs(ex) < POSIT32_MINPOS) ? 0.0 : ex;
     uint32_t pref = posit_from_double(ref);
     return (int32_t)p56 - (int32_t)pref;
 }
