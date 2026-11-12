@@ -90,27 +90,69 @@ _atan56_rv32i:
 	.section .text
 	.align 2
 
-# cordic56_rv32i -- one CORDIC iteration (loop body)
-# Called 56 times from the unrolled loop
-# 
-# Register allocation:
-#   s0:s1  = x (hi:lo)
-#   s2:s3  = y (hi:lo)
-#   s4:s5  = z (hi:lo)
-#   a0:a1  = atan[i] (hi:lo) -- loaded by caller
-#   t0:t1  = y >> i  (hi:lo)
-#   t2:t3  = x >> i  (hi:lo)
-#   t4     = sign of z (0=pos, 1=neg)
-
-# TODO: full implementation next session
-# Sketch of one iteration:
+# cordic56_rv32i -- full 56-iteration CORDIC engine
+# 2026-11-12 pds  initial cut, iter0 verified on Pioneer
 #
-#   bgez s5, .pos_N    # branch if z_lo >= 0 (approximate -- need hi too)
-#   # z negative: xi=x+(y>>i), yi=y-(x>>i), z+=atan[i]
-#   ...
-#   .pos_N:
-#   # z positive: xi=x-(y>>i), yi=y+(x>>i), z-=atan[i]
-#   ...
+# Register allocation (maintained across all iterations):
+#   s0:s1  = x hi:lo   (cos accumulator)
+#   s2:s3  = y hi:lo   (sin accumulator)
+#   s4:s5  = z hi:lo   (angle residual)
+#   a0:a1  = atan[i] hi:lo -- loaded by caller before each iteration
+#
+# Primitives (no stack, pure combinatorial):
+#   cordic56_rv32i_shift  -- 64-bit arithmetic right shift by i
+#   cordic56_rv32i_iter0  -- iteration for i=0 (no shift needed)
+#   cordic56_rv32i_iter   -- general iteration for any i (uses shift)
+#
+# Full function (with prologue/epilogue):
+#   cordic56_rv32i        -- 56-iteration loop, loads atan table
+#
+# Layering philosophy: leaf functions never touch the stack.
+# Only cordic56_rv32i needs a frame.
+# Volder 1959. Gustafson 2026. RV32I 2026.
+
+
+# cordic56_rv32i_shift -- 64-bit arithmetic right shift by i
+# Input:  a0:a1 = value hi:lo, a2 = shift amount (0..55)
+# Output: t2:t3 = result hi:lo
+# Clobbers: t0, t1
+# No stack. Pure combinatorial.
+#
+# if i == 0: t2=a0, t3=a1
+# if 0 < i < 32:
+#   t3 = (a1 >> i) | (a0 << (32-i))
+#   t2 = a0 >> i   (arithmetic)
+# if i >= 32:
+#   t3 = a0 >> (i-32)  (arithmetic)
+#   t2 = a0 >> 31      (sign fill)
+
+        .globl cordic56_rv32i_shift
+cordic56_rv32i_shift:
+        li    t0, 32
+        bge   a2, t0, .shift_hi   # i >= 32?
+
+        # 0 <= i < 32
+        beqz  a2, .shift_zero
+
+        # t3 = (a1 >> i) | (a0 << (32-i))
+        srl   t3, a1, a2          # a1 >> i (logical -- lo word)
+        sub   t0, t0, a2          # 32 - i
+        sll   t1, a0, t0          # a0 << (32-i)
+        or    t3, t3, t1          # combine
+        sra   t2, a0, a2          # a0 >> i (arithmetic -- hi word)
+        ret
+
+.shift_zero:
+        mv    t2, a0
+        mv    t3, a1
+        ret
+
+.shift_hi:
+        # i >= 32: shift by (i-32)
+        sub   a2, a2, t0          # i - 32
+        sra   t3, a0, a2          # a0 >> (i-32) arithmetic
+        srai  t2, a0, 31          # sign fill
+        ret
 
 # cordic56_rv32i_iter0 -- one CORDIC iteration for i=0
 # 2026-11-12 pds  first real iteration -- RV32I 64-bit add/sub/sign
@@ -260,3 +302,33 @@ cordic56_rv32i_iter0_test:
         ld    ra, 72(sp)
         addi  sp, sp, 88
         ret
+
+# ================================================================
+# TEST WRAPPERS -- RV64 only, for verification on Pioneer
+# Not part of the RV32I production code
+# ================================================================
+
+        .globl cordic56_rv32i_shift_test
+cordic56_rv32i_shift_test:
+        addi  sp, sp, -16
+        sd    ra, 0(sp)          # save return address
+        sd    t6, 8(sp)          # save t6 too (used for result ptr)
+        
+        mv    t6, a2             # save result ptr
+        mv    a2, a1             # shift amount
+        srai  t0, a0, 32
+        slli  a1, a0, 32
+        srli  a1, a1, 32
+        mv    a0, t0
+        jal   ra, cordic56_rv32i_shift
+        slli  t5, t2, 32
+        slli  t4, t3, 32
+        srli  t4, t4, 32
+        or    t5, t5, t4
+        sd    t5, 0(t6)
+        
+        ld    ra, 0(sp)
+        ld    t6, 8(sp)
+        addi  sp, sp, 16
+        ret
+
