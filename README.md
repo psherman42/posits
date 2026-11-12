@@ -260,9 +260,6 @@ Quire area:  13,200 um^2 vs 57,463 um^2 (77% reduction)
 Wall-clock:  0.57 us vs 3.26 us MAC loop (5.7x faster)
 ```
 
-The B-posit es/rs analysis was suppressed from public presentation.
-It is published here, openly, with full attribution.
-
 ---
 
 ## CLZ without Zbb (pure RV32I)
@@ -329,10 +326,6 @@ behind it. [github.com/stillwater-sc/universal](https://github.com/stillwater-sc
 es/rs design space analysis, hardware synthesis results. CoNGA 2026,
 Submission 7: "Closing the Performance Gap of Posit Arithmetic Hardware:
 A RISC-V Fife Core Case Study."
-
-**Paul Sherman, Kurt Keville (2026)** — flat128: exact 128-bit accumulation
-via two-product splitting on RISC-V. Zenodo:
-[10.5281/zenodo.23246819](https://doi.org/10.5281/zenodo.23246819)
 
 ---
 
