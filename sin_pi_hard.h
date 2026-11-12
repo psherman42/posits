@@ -9,7 +9,6 @@
  *   ./list_sin_failures | awk '{print $1}' | sed 's/p=//' > sin_hard_inputs.txt
  *   ./mpfr_sinpi < sin_hard_inputs.txt > sin_pi_hard.h
  */
- */
 
 static const uint32_t _sin_pi_hard[][2] = {
     { 0x00000001, 0x00000001 },  /* a=7.523163845262640e-37 OK */
