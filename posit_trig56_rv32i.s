@@ -5,7 +5,9 @@
 #
 # RV32I ABI:
 #   a0-a7: arguments and return values
-#   t0-t6: temporaries (caller-saved)
+#   t0-t5: temporaries (caller-saved)
+#   t6: RESERVED -- shift count (32), initialized by cordic56_rv32i
+#         DO NOT use as general temporary
 #   s0-s11: saved registers (callee-saved)
 #   ra: return address
 #   sp: stack pointer
@@ -26,6 +28,82 @@
 
 	.section .rodata
 	.align 3
+
+# ================================================================
+# Universal 32-bit register primitives
+# 2026-11-12 pds/claude/chat
+#
+# t6 must be initialized to 32 before use:
+#   addi t6, x0, 32
+#
+# RV32I: shift by 32 = shift by 0 (5-bit shift field) -- no-op
+# RV64I: shift by 32 clears/fills upper 32 bits (6-bit shift field)
+#
+# This is not a workaround. It is using the ISA.
+# "One Assembly Sequence. Two Register Widths. Zero Portability Excuses."
+#   -- Paul Sherman, Claude, ChatGPT, 2026
+#
+.macro ZEXT32 reg          # zero-extend: lo words, unsigned results
+    sll  \reg, \reg, t6
+    srl  \reg, \reg, t6
+.endm
+
+.macro SEXT32 reg          # sign-extend: hi words, signed results
+    sll  \reg, \reg, t6
+    sra  \reg, \reg, t6
+.endm
+
+# ADD32C and SUB32B below are essentially full adder/subtractor primitives
+# with carry/borrow propagation. The macro structure maps directly to RTL:
+#   ADD32C  ->  32-bit adder with carry-out
+#   SUB32B  ->  32-bit subtractor with borrow-out  
+#   ADD32HC ->  32-bit adder with carry-in (hi word)
+#   SUB32HS ->  32-bit subtractor with borrow-in (hi word)
+# Exactly the four cells in a ripple-carry 64-bit adder split at the
+# 32-bit boundary. This is RISC-V Base I implementing the same structure
+# a hardware designer would draw.
+
+# ADD32C rd, rs1, rs2 -- 32-bit add with carry out
+# rd = (rs1 + rs2) mod 2^32, t0 = carry
+# Hint: maps to full adder carry-out in RTL
+.macro ADD32C rd, rs1, rs2
+    ZEXT32 \rs1
+    ZEXT32 \rs2
+    add    \rd, \rs1, \rs2
+    ZEXT32 \rd
+    sltu   t0, \rd, \rs2       # carry: result < addend iff overflow
+.endm
+
+# SUB32B rd, rs1, rs2 -- 32-bit subtract with borrow out
+# rd = (rs1 - rs2) mod 2^32, t0 = borrow
+# Hint: maps to full subtractor borrow-out in RTL
+.macro SUB32B rd, rs1, rs2
+    ZEXT32 \rs1
+    ZEXT32 \rs2
+    sltu   t0, \rs1, \rs2      # borrow BEFORE sub: rs1 < rs2
+    sub    \rd, \rs1, \rs2
+    ZEXT32 \rd
+.endm
+
+# ADD32HC rd, rs1, rs2, cin -- 32-bit add hi word with carry in
+# rd = rs1 + rs2 + cin, sign-extended
+# Hint: upper half of 64-bit adder in RTL
+.macro ADD32HC rd, rs1, rs2, cin
+    add    \rd, \rs1, \rs2
+    add    \rd, \rd,  \cin
+    SEXT32 \rd
+.endm
+
+# SUB32HS rd, rs1, rs2, bin -- 32-bit subtract hi word with borrow in
+# rd = rs1 - rs2 - bin, sign-extended
+# Hint: upper half of 64-bit subtractor in RTL
+.macro SUB32HS rd, rs1, rs2, bin
+    sub    \rd, \rs1, \rs2
+    sub    \rd, \rd,  \bin
+    SEXT32 \rd
+.endm
+# ================================================================
+# ================================================================
 
 # arctan table: atan(2^-i) * 2^56, i=0..55
 # 64-bit little-endian, lo word first
@@ -250,6 +328,8 @@ cordic56_rv32i_iter:
         jal   ra, cordic56_rv32i_shift
         mv    s7, t2             # y>>i hi
         mv    s8, t3             # y>>i lo
+        SEXT32 s7                # sign-extend hi
+        ZEXT32 s8                # zero-extend lo
 
         # compute x >> i -> t2:t3 (used directly below)
         mv    a0, s0             # x_hi
@@ -257,15 +337,13 @@ cordic56_rv32i_iter:
         mv    a2, s6             # i
         jal   ra, cordic56_rv32i_shift
         # t2:t3 = x>>i hi:lo
+        SEXT32 t2                # sign-extend hi
+        ZEXT32 t3                # zero-extend lo
 
         # restore atan and determine sign of z
         ld    a0, 8(sp)          # restore atan_hi
         ld    a1, 16(sp)         # restore atan_lo
         slt   t4, s4, x0         # t4 = 1 if z negative
-
-        # save x_orig for y update
-        mv    t5, s1             # x_orig_lo
-        mv    t6, s0             # x_orig_hi
 
         # .iter_neg and .iter_pos are mirror images:
         # neg: x+=, y-=, z+=  (d=-1, rotate clockwise)
@@ -276,20 +354,14 @@ cordic56_rv32i_iter:
 
 .iter_neg:
         # d=-1: x += y>>i, y -= x>>i, z += atan
-        add   s1, s1, s8         # x_lo += (y>>i)_lo
-        sltu  t0, s1, s8         # carry
-        add   s0, s0, s7         # x_hi += (y>>i)_hi
-        add   s0, s0, t0         # + carry
+        ADD32C  s1, s1, s8       # x_lo += (y>>i)_lo, t0=carry
+        ADD32HC s0, s0, s7, t0   # x_hi += (y>>i)_hi + carry
 
-        sltu  t0, s3, t3         # borrow (y_lo < (x>>i)_lo)
-        sub   s3, s3, t3         # y_lo -= (x>>i)_lo
-        sub   s2, s2, t2         # y_hi -= (x>>i)_hi
-        sub   s2, s2, t0         # - borrow
+        SUB32B  s3, s3, t3       # y_lo -= (x>>i)_lo, t0=borrow
+        SUB32HS s2, s2, t2, t0   # y_hi -= (x>>i)_hi - borrow
 
-        add   s5, s5, a1         # z_lo += atan_lo
-        sltu  t0, s5, a1         # carry
-        add   s4, s4, a0         # z_hi += atan_hi
-        add   s4, s4, t0         # + carry
+        ADD32C  s5, s5, a1       # z_lo += atan_lo, t0=carry
+        ADD32HC s4, s4, a0, t0   # z_hi += atan_hi + carry
 
         ld    ra, 0(sp)
         addi  sp, sp, 24
@@ -297,25 +369,152 @@ cordic56_rv32i_iter:
 
 .iter_pos:
         # d=+1: x -= y>>i, y += x>>i, z -= atan
-        sltu  t0, s1, s8         # borrow (x_lo < (y>>i)_lo)
-        sub   s1, s1, s8         # x_lo -= (y>>i)_lo
-        sub   s0, s0, s7         # x_hi -= (y>>i)_hi
-        sub   s0, s0, t0         # - borrow
+        SUB32B  s1, s1, s8       # x_lo -= (y>>i)_lo, t0=borrow
+        SUB32HS s0, s0, s7, t0   # x_hi -= (y>>i)_hi - borrow
 
-        add   s3, s3, t3         # y_lo += (x>>i)_lo  ← t3 not t2
-        sltu  t0, s3, t3         # carry
-        add   s2, s2, t2         # y_hi += (x>>i)_hi  ← t2 not t3
-        add   s2, s2, t0
+        ADD32C  s3, s3, t3       # y_lo += (x>>i)_lo, t0=carry
+        ADD32HC s2, s2, t2, t0   # y_hi += (x>>i)_hi + carry
 
-        sltu  t0, s5, a1
-        sub   s5, s5, a1
-        sub   s4, s4, a0
-        sub   s4, s4, t0
+        SUB32B  s5, s5, a1       # z_lo -= atan_lo, t0=borrow
+        SUB32HS s4, s4, a0, t0   # z_hi -= atan_hi - borrow
 
         ld    ra, 0(sp)
         addi  sp, sp, 24
         ret
 
+# cordic56_rv32i -- full 56-iteration CORDIC engine
+# 2026-11-12 pds
+#
+# The heart of posit32 sin/cos on bare RV32I.
+# No FPU. No MUL. No extensions.
+# Shifts and adds only -- Volder 1959, running on RISC-V 2026.
+#
+# RV32I calling convention:
+#   a0:a1  = angle_q56 hi:lo   (input)
+#   a2     = cos_out pointer   (int64_t*, receives x result)
+#   a3     = sin_out pointer   (int64_t*, receives y result)
+#
+# Internal register allocation:
+#   s0:s1  = x hi:lo   (cos accumulator, starts at CORDIC_K56)
+#   s2:s3  = y hi:lo   (sin accumulator, starts at 0)
+#   s4:s5  = z hi:lo   (angle residual, starts at angle_q56)
+#   s6     = i          (loop counter 0..55)
+#   s7:s8  = y>>i scratch (used by cordic56_rv32i_iter)
+#   s9     = atan table base pointer
+#   s10    = cos_out saved pointer
+#   s11    = sin_out saved pointer
+#
+# CORDIC gain K = product(i=0..55) of 1/sqrt(1 + 2^(-2i))
+# Precomputed at Q56 scale: K * 2^56
+# Starting x at K*2^56 means after 56 rotations x=cos, y=sin
+# without needing a final multiply -- the gain is baked in.
+#
+# CORDIC_K56 = 43757185469210216
+#   hi = 10188013 = 0x9b74ed
+#   lo = 2822987368 = 0xa8435e68
+#
+# After 56 iterations:
+#   x/Q56D = cos(angle), y/Q56D = sin(angle)
+#   Q56D = 2^56 = 72057594037927936
+
+        .globl cordic56_rv32i
+cordic56_rv32i:
+        # prologue -- save all callee-saved registers we use
+        addi  sp, sp, -104
+        sd    s0,   0(sp)
+        sd    s1,   8(sp)
+        sd    s2,  16(sp)
+        sd    s3,  24(sp)
+        sd    s4,  32(sp)
+        sd    s5,  40(sp)
+        sd    s6,  48(sp)
+        sd    s7,  56(sp)
+        sd    s8,  64(sp)
+        sd    s9,  72(sp)
+        sd    s10, 80(sp)
+        sd    s11, 88(sp)
+        sd    ra,  96(sp)
+
+        addi t6, x0, 32   # shift count: 0 on RV32I (5-bit field), 32 on RV64I (6-bit field)
+
+        # x = CORDIC_K56 hi:lo
+        # lui zeroes lower 12 bits, ori fills them -- no sign issue
+        lui   s0, 0x9b7
+        ori   s0, s0, 0x4ed      # s0 = 0x9b74ed = 10188013 (x_hi)
+
+        # x_lo = 2822987368 = 0xa8435e68
+        # lower 12 bits = 0xe68 = 3688 > 2047 (bit 11 set)
+        # addi sign-extends, so lui must compensate:
+        #   addi immediate = 0xe68 - 0x1000 = -408
+        #   lui value = (0xa8435e68 + 0x800) >> 12 = 0xa8436
+        # verify: (0xa8436 << 12) + (-408) = 0xa8435e68 ✓
+        lui   s1, 0xa8436        # upper 20 bits (compensated)
+        addi  s1, s1, -408       # lower 12 bits signed (-408 = 0xfffffe68)
+
+        SEXT32 s0                # sign-extend hi word on RV64
+        ZEXT32 s1                # zero-extend lo word on RV64
+
+        # y = 0
+        li    s2, 0
+        li    s3, 0
+
+        # z = angle_q56 (a0:a1 hi:lo)
+        mv    s4, a0
+        SEXT32 s4                # sign-extend hi word on RV64
+        mv    s5, a1
+        ZEXT32 s5                # zero-extend lo word on RV64
+
+        # save output pointers
+        mv    s10, a2            # cos_out
+        mv    s11, a3            # sin_out
+
+        # atan table base
+        la    s9, _atan56_rv32i
+
+        # loop i = 0..55
+        li    s6, 0
+
+.cordic56_loop:
+        li    t0, 56
+        bge   s6, t0, .cordic56_done
+
+        # load atan[i]: table is 64-bit entries, little-endian
+        # offset = i * 8
+        slli  t1, s6, 3          # t1 = i * 8
+        add   t1, t1, s9         # t1 = &atan[i]
+        lw    a1, 0(t1)          # atan_lo (little-endian: lo at low addr)
+        lw    a0, 4(t1)          # atan_hi
+
+        # call general iteration (s6 = i, s0-s5 = state)
+        jal   ra, cordic56_rv32i_iter
+
+        addi  s6, s6, 1          # i++
+        j     .cordic56_loop
+
+.cordic56_done:
+        # store results as int64_t (little-endian: lo word at low address)
+        sw    s1, 0(s10)         # cos_lo
+        sw    s0, 4(s10)         # cos_hi
+
+        sw    s3, 0(s11)         # sin_lo
+        sw    s2, 4(s11)         # sin_hi
+
+        # epilogue
+        ld    s0,   0(sp)
+        ld    s1,   8(sp)
+        ld    s2,  16(sp)
+        ld    s3,  24(sp)
+        ld    s4,  32(sp)
+        ld    s5,  40(sp)
+        ld    s6,  48(sp)
+        ld    s7,  56(sp)
+        ld    s8,  64(sp)
+        ld    s9,  72(sp)
+        ld    s10, 80(sp)
+        ld    s11, 88(sp)
+        ld    ra,  96(sp)
+        addi  sp, sp, 104
+        ret
 
 # posit32_sin56_rv32i -- ...
 # 2026-11-11 pds
