@@ -20,6 +20,26 @@ The stack runs today on a 64-hart SG2042 RISC-V server (Pioneer) at
 
 ---
 
+## RV32I assembly port (rv32i-asm branch)
+
+The `rv32i-asm` branch ports the CORDIC engine to pure RV32I assembly.
+No FPU. No MUL. No extensions. ADD, SUB, SLL, SRL, SRA, branch, load, store.
+
+64-bit arithmetic on RV32I uses register pairs (hi:lo convention).
+The first working iteration was verified on Pioneer silicon 2026-11-12:
+
+```
+C ref: x=43757185469210216 y=43757185469210216 z=121201084795933376
+ASM: x=43757185469210216 y=43757185469210216 z=121201084795933376
+Match: x=OK y=OK z=OK
+```
+
+Target: posit32 sin(πx) correctly rounded for all 2^31 inputs,
+running on a bare FE310 microcontroller with no OS, no FPU, no extensions.
+696 bytes of hard-case table. Pure shifts and adds.
+
+---
+
 ## The files
 
 |        File            |                         What it does                                 | Lines |
