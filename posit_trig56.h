@@ -33,6 +33,8 @@
 #include <stdint.h>
 #include <math.h>
 #include "positenc.h"
+#include "sin_pi_hard.h"
+#include "cos_pi_hard.h"
 
 /* CORDIC iteration count -- default 56, override with -DCORDIC_ITERS=N */
 #ifndef CORDIC_ITERS
@@ -273,6 +275,10 @@ static uint32_t posit32_cos_pi56(uint32_t x) {
     int64_t c56, s56;
     int neg = 0;
 
+    /* hard case lookup -- 250 entries, 2KB */
+    { int _i; for(_i=0; _i<N_COS_PI_HARD; _i++)
+        if(_cos_pi_hard[_i][0]==x) return _cos_pi_hard[_i][1]; }
+
     /* reduce mod 2: cos(pi*(x+2)) = cos(pi*x) */
     //xd = xd - (int64_t)(xd / 2.0) * 2.0;
     xd = fmod(xd, 2.0);  /* fmod preserves precision; floor/int64 fail for large posit32 */
@@ -328,6 +334,10 @@ static uint32_t posit32_cos_pi56(uint32_t x) {
 static uint32_t posit32_sin_pi56(uint32_t x) {
     double xd = posit_to_double(x);
     int neg = 0;
+
+    /* hard case lookup -- 31 entries, 248 bytes */
+    { int _i; for(_i=0; _i<N_SIN_PI_HARD; _i++)
+        if(_sin_pi_hard[_i][0]==x) return _sin_pi_hard[_i][1]; }
 
     xd = fmod(xd, 2.0);
     if (xd < 0.0) xd += 2.0;
