@@ -492,12 +492,18 @@ cordic56_rv32i:
         j     .cordic56_loop
 
 .cordic56_done:
-        # store results as int64_t (little-endian: lo word at low address)
-        sw    s1, 0(s10)         # cos_lo
-        sw    s0, 4(s10)         # cos_hi
+        # store results -- reassemble hi:lo into int64_t
+        slli  t5, s0, 32         # cos_hi to upper 32
+        slli  t4, s1, 32
+        srli  t4, t4, 32         # cos_lo zero-extended
+        or    t5, t5, t4
+        sd    t5, 0(s10)
 
-        sw    s3, 0(s11)         # sin_lo
-        sw    s2, 4(s11)         # sin_hi
+        slli  t5, s2, 32         # sin_hi to upper 32
+        slli  t4, s3, 32
+        srli  t4, t4, 32         # sin_lo zero-extended
+        or    t5, t5, t4
+        sd    t5, 0(s11)
 
         # epilogue
         ld    s0,   0(sp)
