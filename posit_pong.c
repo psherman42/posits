@@ -1,4 +1,4 @@
-/* posit_pong.c -- ASCII Pong driven by posit32 sin/cos
+/* posit_pong.c -- Tapered Pong -- posit32 tapered precision made playable
  * Ball angle computed by rv32i_sin_pi56 / rv32i_cos_pi56
  * No double in game logic. Posit32 arithmetic throughout.
  * Human (left) vs AI (right).
@@ -14,7 +14,6 @@
 
 #include <stdio.h>
 #include <stdint.h>
-#include <stdlib.h>
 #include <string.h>
 #include <math.h>
 #include <time.h>
@@ -56,6 +55,8 @@ static struct {
 
     /* frame counter */
     int      frame;
+    int      swap;      /* 1 = human on right (smooth side) */
+    int      paused;    /* 1 = game paused */
 } G;
 
 /* ---- terminal raw mode ---- */
@@ -78,18 +79,33 @@ static int kbhit(void){
 }
 
 /* ---- posit32 helpers ---- */
-/* scale posit [0,1] to screen coordinate */
-static int p_to_x(uint32_t p){ 
+/* scale posit [0,1] to screen coordinate
+ * p_to_fixed: convert posit<nbits,es> in [0,1] to integer in [0,scale]
+ * Pure integer -- no double.
+ * Positive posits are monotonically ordered with their bit patterns.
+ * For p in [0,1]: bit pattern in [0, 2^(nbits-2)].
+ * posit32 es=2: POSIT_SHIFT=30. Bola B-posit: change POSIT_NBITS.  */
+#define POSIT_NBITS  32
+#define POSIT_SHIFT  (POSIT_NBITS - 2)   /* 30 for posit32 */
+
+static int p_to_fixed(uint32_t p, int scale){
+    uint64_t r = (uint64_t)p * (uint64_t)scale;
+    return (int)(r >> POSIT_SHIFT);
+}
+
+static int p_to_x(uint32_t p){
     double d = posit_to_double(p);
+    if(G.swap) d = 1.0 - d;    /* t=toggle: flip for human on smooth side */
     int x = (int)(d * (W-2)) + 1;
-    if(x < 1) x = 1;
+    if(x < 1)   x = 1;
     if(x > W-2) x = W-2;
     return x;
 }
+
 static int p_to_y(uint32_t p){
     double d = posit_to_double(p);
     int y = (int)(d * (H-2)) + 1;
-    if(y < 1) y = 1;
+    if(y < 1)   y = 1;
     if(y > H-2) y = H-2;
     return y;
 }
@@ -160,7 +176,7 @@ static void render(void){
     int deg = (int)(atan2(sy, sx) * 180.0 / 3.14159265);
     if(deg < -180) deg += 360;
     snprintf(info, sizeof(info),
-             " angle=%3d°  sin=%+.4f  cos=%+.4f  [posit32 RV32I CORDIC]",
+             " angle=%3d°  sin=%+.4f  cos=%+.4f  [Tapered Pong: smooth center, coarse edges -- posit32 precision]",
              deg,
              posit_to_double(sin_v),
              posit_to_double(cos_v));
@@ -170,7 +186,9 @@ static void render(void){
     printf("\033[H");
     for(int y=0; y<H; y++) printf("%s\n", _buf[y]);
     printf("%s\n", info);
-    printf(" [w/s]=paddle  [q]=quit  frame=%d  Pure posit32 RV32I CORDIC\n",
+    printf(" [w/s]=paddle [t]=swap [space]=pause [q]=quit  side=%s %s frame=%d\n",
+           G.swap?"smooth(right)":"coarse(left)",
+           G.paused?"PAUSED":"      ",
            G.frame);
     fflush(stdout);
 }
@@ -204,15 +222,20 @@ static void move_ball(void){
     if(by <= 1)   { G.dy_sign =  1; G.by = posit_from_double(0.08); G.angle = posit_from_double(posit_to_double(G.angle) + 0.03 + (G.frame%7)*0.01); }
     if(by >= H-2) { G.dy_sign = -1; G.by = posit_from_double(0.92); G.angle = posit_from_double(posit_to_double(G.angle) - 0.03 - (G.frame%5)*0.01); }
 
-    /* left paddle */
+    /* paddle collision
+     * lpad always on left side of screen
+     * rpad always on right side of screen
+     * swap=0: human=left(lpad), AI=right(rpad)
+     * swap=1: human=right(rpad), AI=left(lpad)              */
+
+    /* left side collision */
     if(bx <= 2){
         if(by >= G.lpad && by < G.lpad + PADDLE){
             G.dx_sign = 1;
-            /* vary angle based on where ball hits paddle */
             double hit = (double)(by - G.lpad) / PADDLE;
             G.angle = posit_from_double(0.1 + hit * 0.4);
         } else {
-            G.rscore++;
+            if(G.swap) G.lscore++; else G.rscore++;
             G.bx = posit_from_double(0.5);
             G.by = posit_from_double(0.5);
             G.dx_sign = 1;
@@ -220,14 +243,14 @@ static void move_ball(void){
         }
     }
 
-    /* right paddle */
+    /* right side collision */
     if(bx >= W-3){
         if(by >= G.rpad && by < G.rpad + PADDLE){
             G.dx_sign = -1;
             double hit = (double)(by - G.rpad) / PADDLE;
             G.angle = posit_from_double(0.6 + hit * 0.4);
         } else {
-            G.lscore++;
+            if(G.swap) G.rscore++; else G.lscore++;
             G.bx = posit_from_double(0.5);
             G.by = posit_from_double(0.5);
             G.dx_sign = -1;
@@ -239,10 +262,11 @@ static void move_ball(void){
 /* ---- AI paddle ---- */
 static void ai_move(void){
     int by = p_to_y(G.by);
-    int mid = G.rpad + PADDLE/2;
-    /* simple tracking with one posit32 step */
-    if(mid < by && G.rpad < H-2-PADDLE) G.rpad++;
-    if(mid > by && G.rpad > 1)          G.rpad--;
+    /* AI controls rpad (swap=0) or lpad (swap=1) */
+    int *ap = G.swap ? &G.lpad : &G.rpad;
+    int mid = *ap + PADDLE/2;
+    if(mid < by && *ap < H-1-PADDLE) (*ap)++;
+    if(mid > by && *ap > 1)          (*ap)--;
 }
 
 /* ---- main ---- */
@@ -267,14 +291,17 @@ int main(void){
     while(1){
         int ch = kbhit();
         if(ch == 'q' || ch == 'Q') break;
-        if(ch == 'w' && G.lpad > 1)          G.lpad--;
-        if(ch == 's' && G.lpad < H-2-PADDLE) G.lpad++;
+        /* human controls lpad (swap=0) or rpad (swap=1) */
+        int *hp = G.swap ? &G.rpad : &G.lpad;
+        if(ch == 'w' && *hp > 1)          (*hp)--;
+        if(ch == 's' && *hp < H-1-PADDLE) (*hp)++;
+        if(ch == 't') G.swap = !G.swap;
+        if(ch == 32) G.paused = !G.paused;  /* spacebar */
 
-        move_ball();
-        ai_move();
+        if(!G.paused){ move_ball(); ai_move(); }
         render();
         /* drift angle slightly every frame -- shows live posit32 */
-        if(G.frame % 3 == 0)
+        if(!G.paused && G.frame % 3 == 0)
             G.angle = posit_from_double(
                 fmod(posit_to_double(G.angle) + 0.001, 2.0));
         G.frame++;
