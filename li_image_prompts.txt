@@ -1,0 +1,29 @@
+# LinkedIn image prompts for two-post series
+# Ready to use when image generation limit resets
+# 2026-11-12 pds
+
+POST 1 IMAGE:
+Technical infographic, navy blue background, single panel layout. A single
+register labeled "t6 = 32" at top, branching into two paths. Left branch
+labeled "RV32I · 5-bit shift field" shows a compact 32-bit register bar in
+electric blue. Right branch labeled "RV64I · 6-bit shift field" shows a
+64-bit register bar split into two halves -- left half dark/grey, right half
+electric blue glowing. Bottom: single green checkmark with text "One sequence.
+Two architectures." Bold yellow tagline at bottom: "Architecture agnosticism
+is the holy grail." No code. No numbers. Pure visual metaphor. Poster style,
+clean sans-serif typography. Single panel only, 16:9 aspect ratio, do not
+include a second panel, do not combine both concepts into one image.
+
+POST 2 IMAGE:
+Technical infographic, navy blue background, single panel layout. Top section
+labeled "64-bit Addition" in electric blue: two rectangular blocks connected
+left-to-right by an arrow labeled "Carry". Left block: "ADD32C · Low word ·
+carry-out". Right block: "ADD32HC · High word · carry-in". Both in blue.
+Bottom section labeled "64-bit Subtraction" in amber: same structure, two
+blocks connected by arrow labeled "Borrow". Left block: "SUB32B · Low word ·
+borrow-out". Right block: "SUB32HS · High word · borrow-in". Both in amber.
+Center between sections: dashed horizontal dividing line. Bottom green box:
+"Four primitives. Open source. github.com/psherman42/posits". Bold yellow
+tagline: "Architecture agnosticism is the holy grail." No code. No numbers.
+Clean poster style. Single panel only, 16:9 aspect ratio, do not include a
+second panel, do not combine both concepts into one image.
