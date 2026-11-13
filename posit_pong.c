@@ -1,15 +1,32 @@
-/* posit_pong.c -- Tapered Pong -- posit32 tapered precision made playable
- * Ball angle computed by rv32i_sin_pi56 / rv32i_cos_pi56
- * No double in game logic. Posit32 arithmetic throughout.
- * Human (left) vs AI (right).
+/* posit_pong.c -- Tapered Pong v1 (prototype)
+ * An Integer-Only RISC-V Posit32 Demonstration -- work in progress.
  *
- * 2026-11-13 pds/claude -- Pioneer got-milk SG2042
+ * Ball angle computed by rv32i_sin_pi56 / rv32i_cos_pi56
+ * (56-iteration CORDIC in pure RV32I assembly -- no FPU, no MUL)
+ *
+ * v1 status: game mechanics and CORDIC are working. Ball position,
+ * velocity, and display still use double as a bridge via posit_to_double /
+ * posit_from_double. The integer-only claim is not yet satisfied.
+ * See layers below for the roadmap.
+ *
+ * Layer 0 (done): playable prototype -- posit32 CORDIC drives ball angle
+ * Layer 1 (todo): integer p_to_x/p_to_y -- posit32 to screen coords
+ * Layer 2 (todo): integer p_add/p_sub -- posit32 arithmetic, no double
+ * Layer 3 (todo): integer-only build -- no math.h, no double anywhere
+ *
+ * Human (left/coarse) vs AI (right/smooth) -- [t] to swap sides
+ * The non-uniform ball motion is posit32 tapered precision made visible.
+ *
+ * 2026-11-13 pds/claude/chat -- Pioneer got-milk SG2042
  * "My very first video game with TV RF Modulator on Ch.3" -- Paul Sherman
  *
- * Build:
- *   cc -O2 -o posit_pong posit_pong.c posit_trig56_rv32i.s -I. -lm
+ * Volder 1959. Gustafson 2026. Woz smiles 2026.
  *
- * Controls: w/s = up/down, q = quit
+ * Build:
+ *   cc -O2 -o posit_pong posit_pong.c posit32_sin56_rv32i.c \
+ *      posit_trig56_rv32i.s -I. -lm
+ *
+ * Controls: w/s = up/down, t = swap sides, space = pause, q = quit
  */
 
 #include <stdio.h>
