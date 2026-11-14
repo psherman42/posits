@@ -11,7 +11,9 @@
  *
  * Layer 0 (done): playable prototype -- posit32 CORDIC drives ball angle
  * Layer 1 (done): integer p_to_x/p_to_y -- posit32 to screen coords (posit_q16.h)
- * Layer 2 (todo): integer p_add/p_sub -- posit32 arithmetic, no double
+ * Layer 2 (done): integer p_add/p_sub via Q16 (posit_q16.h)
+ *   Note: quire32.h has exact integer accumulation but double API;
+ *   quire32_add_posit() integer interface is the proper next step
  * Layer 3 (todo): integer-only build -- no math.h, no double anywhere
  *
  * Human (left/coarse) vs AI (right/smooth) -- [t] to swap sides
@@ -139,18 +141,12 @@ static int p_to_y(uint32_t p){
     return y;
 }
 
-/* add posit32 value (clamped to [0,1]) */
+/* add/sub posit32 in [0,1] -- Layer 2: integer, no double */
 static uint32_t p_add(uint32_t a, uint32_t b){
-    double d = posit_to_double(a) + posit_to_double(b);
-    if(d > 1.0) d = 1.0;
-    if(d < 0.0) d = 0.0;
-    return posit_from_double(d);
+    return p_add_int(a, b);
 }
 static uint32_t p_sub(uint32_t a, uint32_t b){
-    double d = posit_to_double(a) - posit_to_double(b);
-    if(d > 1.0) d = 1.0;
-    if(d < 0.0) d = 0.0;
-    return posit_from_double(d);
+    return p_sub_int(a, b);
 }
 
 /* ---- draw ---- */

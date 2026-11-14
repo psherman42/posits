@@ -2,9 +2,12 @@
 #define POSIT_Q16_H
 #include "positenc.h"
 
-/* posit32 to Q16 fixed-point -- integer only, no double
- * Layer 1 of Tapered Pong integer-only build.
+/* posit32 <-> Q16 fixed-point, integer only, no double
+ * Layer 1+2 of Tapered Pong integer-only build.
+ * Q16 range [0, 65536] represents posit [0, 1]
  * 2026-11-13 pds/claude                                        */
+
+/* -- posit32 to Q16 ------------------------------------------ */
 static int32_t posit_to_q16(uint32_t p) {
     int k, e, runlen;
     uint32_t bits;
@@ -50,4 +53,81 @@ static int32_t posit_to_q16(uint32_t p) {
     if (val < 0) val = 0;
     return val;
 }
+
+/* -- Q16 to posit32 ------------------------------------------ */
+static uint32_t q16_to_posit32(int32_t q) {
+    int k, e, neg_k, regime_len, frac_bits, pos, log2_qn;
+    int32_t qn, tmp, mant, frac;
+    uint32_t p, frac_field;
+
+    if (q <= 0)     return 0;
+    if (q >= 65536) return 0x40000000u;  /* 1.0 */
+
+    /* find k (negative): multiply q by 16 until >= 65536 */
+    qn = q;
+    k = 0;
+    while (qn < 65536) { qn <<= 4; k--; }
+    /* qn = q * 16^(-k), in [65536, 1048576) */
+
+    /* find e: floor(log2(qn)) - 16 */
+    log2_qn = 0;
+    tmp = qn;
+    while (tmp > 1) { tmp >>= 1; log2_qn++; }
+    e = log2_qn - 16;
+    if (e < 0) e = 0;
+    if (e > 3) e = 3;
+
+    /* normalize mantissa: qn >> e, in [65536, 131072) */
+    mant = qn >> e;
+    frac = mant - 65536;  /* fraction in [0, 65536), Q16 */
+
+    /* assemble posit32 bit pattern */
+    /* sign=0, regime=neg_k zeros + 1 terminator, es=2 bits, fraction */
+    neg_k = -k;
+    regime_len = neg_k + 1;  /* zeros + terminator */
+
+    p = 0;
+    pos = 30;  /* bit 30 (bit 31 = sign = 0) */
+
+    /* regime: neg_k zeros (already 0), then terminator 1 */
+    pos -= neg_k;
+    if (pos >= 0) p |= (1u << pos);
+    pos--;
+
+    /* exponent: 2 bits, MSB first */
+    if (pos >= 0) { p |= (uint32_t)((e >> 1) & 1) << pos; pos--; }
+    if (pos >= 0) { p |= (uint32_t)(e & 1) << pos; pos--; }
+
+    /* fraction: remaining bits */
+    frac_bits = pos + 1;
+    if (frac_bits > 0 && frac_bits <= 16) {
+        frac_field = (uint32_t)frac >> (16 - frac_bits);
+        p |= frac_field;
+    } else if (frac_bits > 16) {
+        p |= (uint32_t)frac << (frac_bits - 16);
+    }
+
+    return p;
+}
+
+/* -- integer p_add/p_sub (Layer 2) --------------------------- */
+/* posit32 add/subtract in [0,1] via Q16, no double            */
+static uint32_t p_add_int(uint32_t a, uint32_t b) {
+    int32_t qa = posit_to_q16(a);
+    int32_t qb = posit_to_q16(b);
+    int32_t qr = qa + qb;
+    if (qr > 65536) qr = 65536;
+    if (qr < 0)     qr = 0;
+    return q16_to_posit32(qr);
+}
+
+static uint32_t p_sub_int(uint32_t a, uint32_t b) {
+    int32_t qa = posit_to_q16(a);
+    int32_t qb = posit_to_q16(b);
+    int32_t qr = qa - qb;
+    if (qr > 65536) qr = 65536;
+    if (qr < 0)     qr = 0;
+    return q16_to_posit32(qr);
+}
+
 #endif /* POSIT_Q16_H */
