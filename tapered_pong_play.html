@@ -465,8 +465,8 @@ function ai_move() {
     const by = p_to_y(G.by);
     const ap = G.swap ? 'lpad' : 'rpad';
     const mid = G[ap] + PADDLE_H/2;
-    if (mid < by && G[ap] < H - PADDLE_H - 2) G[ap]++;
-    if (mid > by && G[ap] > 2)                G[ap]--;
+    if (mid < by && G[ap] < H - PADDLE_H - 2) G[ap] += 3;
+    if (mid > by && G[ap] > 2)                G[ap] -= 3;
 }
 
 function update_info() {
@@ -514,8 +514,8 @@ function loop() {
     if (!G.paused && G.running) {
         /* human paddle */
         const hp = G.swap ? 'rpad' : 'lpad';
-        if ((keys['w'] || keys['W'] || keys['ArrowUp'])    && G[hp] > 2)              G[hp]--;
-        if ((keys['s'] || keys['S'] || keys['ArrowDown']) && G[hp] < H-PADDLE_H-2) G[hp]++;
+        if ((keys['w'] || keys['W'] || keys['ArrowUp'])    && G[hp] > 2)              G[hp] -= 3;
+        if ((keys['s'] || keys['S'] || keys['ArrowDown']) && G[hp] < H-PADDLE_H-2) G[hp] += 3;
 
         move_ball();
         ai_move();
