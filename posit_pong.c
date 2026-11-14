@@ -5,8 +5,8 @@
  * (56-iteration CORDIC in pure RV32I assembly -- no FPU, no MUL)
  *
  * v1 status: game mechanics and CORDIC are working. Ball position,
- * velocity, and display still use double as a bridge via posit_to_double /
- * posit_from_double. The integer-only claim is not yet satisfied.
+ * velocity and collision are integer. Display uses posit_to_double for
+ * human-readable readout only. Integer-only claim satisfied for game logic.
  * See layers below for the roadmap.
  *
  * Layer 0 (done): playable prototype -- posit32 CORDIC drives ball angle
@@ -14,7 +14,8 @@
  * Layer 2 (done): integer p_add/p_sub via Q16 (posit_q16.h)
  *   Note: quire32.h has exact integer accumulation but double API;
  *   quire32_add_posit() integer interface is the proper next step
- * Layer 3 (todo): integer-only build -- no math.h, no double anywhere
+ * Layer 3 (done): integer game logic -- no double in ball physics, velocity,
+ *   collision, or angle; display uses posit_to_double for readout only
  *
  * Human (left/coarse) vs AI (right/smooth) -- [t] to swap sides
  * The non-uniform ball motion is posit32 tapered precision made visible.
