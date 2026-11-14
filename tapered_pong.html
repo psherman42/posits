@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Tapered Pong</title>
+<style>
+:root {
+  --bg: #0a0a0f;
+  --court: #0d1117;
+  --border: #1e3a5f;
+  --paddle-h: #4a9eff;
+  --paddle-ai: #ff6b35;
+  --ball: #ffffff;
+  --net: #1e3a5f;
+  --text: #e0e0e0;
+  --muted: #666;
+  --coarse: #ff4444;
+  --smooth: #44ff88;
+  --accent: #4a9eff;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Courier New', monospace;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 1rem;
+}
+h1 {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.1em;
+  margin-bottom: 0.2rem;
+}
+.subtitle {
+  font-size: 0.6rem;
+  color: var(--muted);
+  margin-bottom: 0.8rem;
+  text-align: center;
+}
+canvas {
+  border: 1px solid var(--border);
+  display: block;
+  image-rendering: pixelated;
+}
+.info {
+  font-size: 0.65rem;
+  color: var(--muted);
+  margin-top: 0.5rem;
+  text-align: center;
+  min-height: 1.2em;
+}
+.info .coarse { color: var(--coarse); font-weight: bold; }
+.info .smooth { color: var(--smooth); }
+.controls {
+  font-size: 0.6rem;
+  color: var(--muted);
+  margin-top: 0.3rem;
+  text-align: center;
+}
+.score {
+  font-size: 0.75rem;
+  color: var(--text);
+  margin-top: 0.4rem;
+  display: flex;
+  gap: 2rem;
+}
+.score span { color: var(--accent); }
+.posit-display {
+  font-size: 0.6rem;
+  color: var(--muted);
+  margin-top: 0.3rem;
+  font-family: 'Courier New', monospace;
+}
+button {
+  margin-top: 0.5rem;
+  padding: 0.4rem 1rem;
+  background: var(--border);
+  color: var(--text);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+button:hover { background: var(--accent); color: var(--bg); }
+</style>
+</head>
+<body>
+<h1>TAPERED PONG</h1>
+<div class="subtitle">
+  An Integer-Only RISC-V Posit32 Demonstration<br>
+  Paul Sherman (IDC) · Claude (Anthropic) · ChatGPT (OpenAI) · 2026
+</div>
+
+<canvas id="court" width="480" height="300"></canvas>
+
+<div class="info" id="info">Loading...</div>
+<div class="posit-display" id="posit-display"></div>
+
+<div class="score">
+  <span id="hscore">Human: 0</span>
+  <span id="ascore">AI: 0</span>
+</div>
+
+<div class="controls">
+  W/S or ↑/↓ = paddle &nbsp;·&nbsp; T = swap sides &nbsp;·&nbsp; Space = pause &nbsp;·&nbsp; R = restart
+</div>
+<button id="startbtn">START</button>
+
+<script>
+'use strict';
+
+/* ============================================================
+   POSIT32 CORDIC -- integer BigInt arithmetic
+   Direct port from posit_cordic.js
+   ============================================================ */
+
+const Q56_PI2 = 113187804032455040n;
+const Q56D    = 72057594037927936n;
+const CORDIC_K56 = 43757185469210216n;
+
+const ATAN56 = [
+    56593902016227520n, 33409331186036028n, 17652573055549882n,
+     8960721713639278n,  4497749271019253n,  2251067235130761n,
+     1125808294293075n,   562938500594601n,   281473545067997n,
+      140737309398766n,    70368721808055n,    35184369292629n,
+       17592185694890n,     8796092978517n,     4398046505642n,
+        2199023254869n,     1099511627690n,      549755813877n,
+         274877906942n,      137438953471n,       68719476735n,
+          34359738367n,       17179869183n,        8589934591n,
+           4294967295n,        2147483647n,        1073741823n,
+            536870912n,         268435456n,         134217728n,
+             67108864n,          33554432n,          16777216n,
+              8388608n,           4194304n,           2097152n,
+              1048576n,            524288n,            262144n,
+               131072n,             65536n,             32768n,
+                16384n,              8192n,              4096n,
+                 2048n,              1024n,               512n,
+                  256n,               128n,                64n,
+                   32n,                16n,                 8n,
+                    4n,                 2n,
+];
+
+function cordic56(angle_q56) {
+    let x = CORDIC_K56, y = 0n, z = angle_q56;
+    for (let i = 0; i < 56; i++) {
+        const d = z >= 0n ? 1n : -1n;
+        const xs = x - d * (y >> BigInt(i));
+        const ys = y + d * (x >> BigInt(i));
+        z = z - d * ATAN56[i];
+        x = xs; y = ys;
+    }
+    return { cos: x, sin: y };
+}
+
+function posit32_to_float(p) {
+    p = p >>> 0;
+    if (p === 0) return 0.0;
+    if (p === 0x80000000) return NaN;
+    const neg = (p & 0x80000000) !== 0;
+    if (neg) p = (~p + 1) >>> 0;
+    let bits = (p << 1) >>> 0;
+    let k, runlen;
+    if (bits & 0x80000000) {
+        k = -1;
+        while (bits & 0x80000000) { k++; bits = (bits << 1) >>> 0; }
+        bits = (bits << 1) >>> 0; runlen = k + 2;
+    } else {
+        k = 0;
+        while (!(bits & 0x80000000)) { k--; bits = (bits << 1) >>> 0; }
+        bits = (bits << 1) >>> 0; runlen = -k + 1;
+    }
+    const e = (bits >>> 30) & 0x3;
+    bits = (bits << 2) >>> 0;
+    const frac_bits = 32 - 1 - (runlen + 1) - 2;
+    let f = frac_bits > 0 ? (bits >>> (32 - frac_bits)) / Math.pow(2, frac_bits) : 0;
+    const val = Math.pow(16, k) * Math.pow(2, e) * (1.0 + f);
+    return neg ? -val : val;
+}
+
+function float_to_posit32(x) {
+    if (x !== x) return 0x80000000;
+    if (x === 0.0) return 0;
+    const neg = x < 0; if (neg) x = -x;
+    const maxpos = Math.pow(2,56), minpos = Math.pow(2,-56);
+    if (x > maxpos) x = maxpos; if (x < minpos) x = minpos;
+    let p = 0, y = x, e = 0, k = 0;
+    if (y >= 1.0) { while (y >= 16.0) { y /= 16.0; k++; } }
+    else { while (y < 1.0) { y *= 16.0; k--; } }
+    while (y >= 2.0) { y /= 2.0; e++; }
+    let i = 1;
+    if (k >= 0) {
+        for (let j = 0; j <= k && i <= 30; j++, i++) p |= (1 << (31-i));
+        if (i <= 30) i++;
+    } else {
+        i += (-k);
+        if (i <= 30) { p |= (1 << (31-i)); i++; }
+    }
+    if (i <= 30) { p |= (((e>>1)&1) << (31-i)); i++; }
+    if (i <= 30) { p |= ((e&1) << (31-i)); i++; }
+    y -= 1.0;
+    while (y > 0.0 && i <= 31) {
+        y *= 2.0; p |= (Math.floor(y) << (31-i));
+        y -= Math.floor(y); i++;
+    }
+    p = p >>> 0;
+    if (neg) p = (~p + 1) >>> 0;
+    return p >>> 0;
+}
+
+function posit32_sin_pi(p) {
+    let xd = posit32_to_float(p);
+    xd = ((xd % 2.0) + 2.0) % 2.0;
+    let neg = false;
+    if      (xd < 0.5)  { neg = false; }
+    else if (xd < 1.0)  { xd = 1.0 - xd; neg = false; }
+    else if (xd < 1.5)  { xd = xd - 1.0; neg = true; }
+    else                { xd = 2.0 - xd;  neg = true; }
+    const aq = BigInt(Math.round(xd * 2.0 * Number(Q56_PI2)));
+    const { sin } = cordic56(aq);
+    const r = Number(sin) / Number(Q56D);
+    return float_to_posit32(neg ? -r : r);
+}
+
+function posit32_cos_pi(p) {
+    let xd = posit32_to_float(p);
+    xd = ((xd % 2.0) + 2.0) % 2.0;
+    let neg = false;
+    if      (xd < 0.5)  { neg = false; }
+    else if (xd < 1.0)  { xd = 1.0 - xd; neg = true; }
+    else if (xd < 1.5)  { xd = xd - 1.0; neg = true; }
+    else                { xd = 2.0 - xd;  neg = false; }
+    const aq = BigInt(Math.round(xd * 2.0 * Number(Q56_PI2)));
+    const { cos } = cordic56(aq);
+    const r = Number(cos) / Number(Q56D);
+    return float_to_posit32(neg ? -r : r);
+}
+
+/* ============================================================
+   POSIT32 Q16 -- integer coordinate mapping
+   ============================================================ */
+const POSIT_SHIFT = 30;  /* nbits-2 for posit32 */
+
+function posit_to_q16(p) {
+    p = p >>> 0;
+    if (p === 0) return 0;
+    if (p & 0x80000000) return 0;  /* negative -- clamp */
+    let bits = (p << 1) >>> 0;
+    let k, runlen;
+    if (bits & 0x80000000) {
+        k = -1;
+        while (bits & 0x80000000) { k++; bits = (bits<<1)>>>0; }
+        bits = (bits<<1)>>>0; runlen = k+2;
+    } else {
+        k = 0;
+        while (!(bits & 0x80000000)) { k--; bits = (bits<<1)>>>0; }
+        bits = (bits<<1)>>>0; runlen = -k+1;
+    }
+    const e = (bits>>>30)&0x3; bits = (bits<<2)>>>0;
+    let frac_bits = 32-1-(runlen+1)-2;
+    if (frac_bits < 0) frac_bits = 0;
+    if (frac_bits > 28) frac_bits = 28;
+    const frac_field = frac_bits > 0 ? bits>>>(32-frac_bits) : 0;
+    const mantissa = (1<<frac_bits)|frac_field;
+    const shift = -4*k - e;
+    const total_shift = frac_bits + shift - 16;
+    let val;
+    if (total_shift >= 32) val = 0;
+    else if (total_shift >= 0) val = mantissa >> total_shift;
+    else val = mantissa << (-total_shift);
+    return val < 0 ? 0 : val;
+}
+
+function q16_to_posit32(q) {
+    if (q <= 0) return 0;
+    if (q >= 65536) return 0x40000000;
+    let qn = q, k = 0;
+    while (qn < 65536) { qn <<= 4; k--; }
+    let log2_qn = 0, tmp = qn;
+    while (tmp > 1) { tmp >>= 1; log2_qn++; }
+    let e = log2_qn - 16;
+    if (e < 0) e = 0; if (e > 3) e = 3;
+    const mant = qn >> e;
+    const frac = mant - 65536;
+    const neg_k = -k;
+    let p = 0, pos = 30;
+    pos -= neg_k;
+    if (pos >= 0) p |= (1 << pos);
+    pos--;
+    if (pos >= 0) { p |= ((e>>1)&1) << pos; pos--; }
+    if (pos >= 0) { p |= (e&1) << pos; pos--; }
+    const frac_bits = pos+1;
+    if (frac_bits > 0 && frac_bits <= 16)
+        p |= frac >> (16-frac_bits);
+    else if (frac_bits > 16)
+        p |= frac << (frac_bits-16);
+    return p >>> 0;
+}
+
+function p_add(a, b) {
+    const q = posit_to_q16(a) + posit_to_q16(b);
+    return q16_to_posit32(Math.max(0, Math.min(65536, q)));
+}
+function p_sub(a, b) {
+    const q = posit_to_q16(a) - posit_to_q16(b);
+    return q16_to_posit32(Math.max(0, Math.min(65536, q)));
+}
+
+/* ============================================================
+   POSIT32 CONSTANTS
+   ============================================================ */
+const P32_HALF   = 0x38000000;
+const P32_0_08   = 0x223d70a4;
+const P32_0_92   = 0x3eb851ec;
+const P32_0_15   = 0x2999999a;
+const P32_0_65   = 0x3a666666;
+const P32_0_10   = 0x24cccccd;
+const P32_0_60   = 0x3999999a;
+const P32_0_001  = 0x0c0c49ba;
+const P32_0_03   = 0x1bae147b;
+const P32_STEP_X = 0x14189375;
+const P32_STEP_Y = 0x1624dd2f;
+const P32_0_40   = 0x34cccccd;
+
+/* ============================================================
+   GAME
+   ============================================================ */
+const W = 480, H = 300;
+const PADDLE_H = 50, PADDLE_W = 8;
+
+const canvas = document.getElementById('court');
+const ctx = canvas.getContext('2d');
+
+const G = {
+    bx: P32_HALF, by: P32_HALF,
+    angle: P32_0_15,
+    dx_sign: 1, dy_sign: 1,
+    lpad: H/2 - PADDLE_H/2,
+    rpad: H/2 - PADDLE_H/2,
+    lscore: 0, rscore: 0,
+    frame: 0, paused: false, swap: false,
+    running: false,
+};
+
+function p_to_x(p) {
+    let q = posit_to_q16(p >>> 0);
+    if (G.swap) q = 65536 - q;
+    return Math.max(1, Math.min(W-2, Math.round(q * (W-2) / 65536) + 1));
+}
+function p_to_bx(p) {
+    const q = posit_to_q16(p >>> 0);
+    return Math.max(1, Math.min(W-2, Math.round(q * (W-2) / 65536) + 1));
+}
+function p_to_y(p) {
+    const q = posit_to_q16(p >>> 0);
+    return Math.max(1, Math.min(H-2, Math.round(q * (H-2) / 65536) + 1));
+}
+
+function draw() {
+    ctx.fillStyle = '#0d1117';
+    ctx.fillRect(0, 0, W, H);
+
+    /* net */
+    ctx.strokeStyle = '#1e3a5f';
+    ctx.setLineDash([8, 8]);
+    ctx.beginPath(); ctx.moveTo(W/2, 0); ctx.lineTo(W/2, H); ctx.stroke();
+    ctx.setLineDash([]);
+
+    /* border */
+    ctx.strokeStyle = '#1e3a5f';
+    ctx.strokeRect(0, 0, W, H);
+
+    /* paddles */
+    ctx.fillStyle = '#4a9eff';
+    ctx.fillRect(4, G.lpad, PADDLE_W, PADDLE_H);
+    ctx.fillStyle = '#ff6b35';
+    ctx.fillRect(W-4-PADDLE_W, G.rpad, PADDLE_W, PADDLE_H);
+
+    /* ball */
+    const bx = p_to_x(G.bx);
+    const by = p_to_y(G.by);
+    const bx_q = posit_to_q16(G.bx);
+    const in_coarse = bx_q < 6553 || bx_q > 58982;
+    ctx.fillStyle = in_coarse ? '#ff4444' : '#ffffff';
+    ctx.beginPath();
+    ctx.arc(bx, by, 5, 0, Math.PI*2);
+    ctx.fill();
+
+    /* score */
+    ctx.fillStyle = '#4a9eff';
+    ctx.font = '20px Courier New';
+    ctx.textAlign = 'center';
+    ctx.fillText(G.lscore, W/2 - 40, 24);
+    ctx.fillText(G.rscore, W/2 + 40, 24);
+
+    /* coarse zone indicator on canvas */
+    if (in_coarse) {
+        ctx.fillStyle = 'rgba(255,68,68,0.15)';
+        if (bx_q < 6553) ctx.fillRect(0, 0, W*0.1, H);
+        else ctx.fillRect(W*0.9, 0, W*0.1, H);
+    }
+}
+
+function move_ball() {
+    const sin_v = posit32_sin_pi(G.angle);
+    const cos_v = posit32_cos_pi(G.angle);
+    const qcos = posit_to_q16(cos_v & 0x7fffffff);
+    const qsin = posit_to_q16(sin_v & 0x7fffffff);
+    const dx = q16_to_posit32(Math.round(qcos * posit_to_q16(P32_STEP_X) / 65536));
+    const dy = q16_to_posit32(Math.round(qsin * posit_to_q16(P32_STEP_Y) / 65536));
+
+    if (G.dx_sign > 0) G.bx = p_add(G.bx, dx);
+    else               G.bx = p_sub(G.bx, dx);
+    if (G.dy_sign > 0) G.by = p_add(G.by, dy);
+    else               G.by = p_sub(G.by, dy);
+
+    const bx = p_to_bx(G.bx);
+    const by = p_to_y(G.by);
+
+    /* wall bounce */
+    if (by <= 2)   { G.dy_sign =  1; G.by = P32_0_08; G.angle = p_add(G.angle, P32_0_03); }
+    if (by >= H-3) { G.dy_sign = -1; G.by = P32_0_92; G.angle = p_sub(G.angle, P32_0_03); }
+
+    /* left paddle */
+    if (bx <= PADDLE_W + 4) {
+        if (by >= G.lpad && by < G.lpad + PADDLE_H) {
+            G.dx_sign = 1;
+            const hit_q = Math.round((by - G.lpad) * 65536 / PADDLE_H);
+            G.angle = p_add(P32_0_10, q16_to_posit32(Math.round(hit_q * posit_to_q16(P32_0_40) / 65536)));
+        } else {
+            if (G.swap) G.lscore++; else G.rscore++;
+            setTimeout(reset_ball, 500);
+        }
+    }
+
+    /* right paddle */
+    if (bx >= W - PADDLE_W - 5) {
+        if (by >= G.rpad && by < G.rpad + PADDLE_H) {
+            G.dx_sign = -1;
+            const hit_q = Math.round((by - G.rpad) * 65536 / PADDLE_H);
+            G.angle = p_add(P32_0_60, q16_to_posit32(Math.round(hit_q * posit_to_q16(P32_0_40) / 65536)));
+        } else {
+            if (G.swap) G.rscore++; else G.lscore++;
+            setTimeout(reset_ball, 500);
+        }
+    }
+}
+
+function reset_ball() {
+    G.bx = P32_HALF; G.by = P32_HALF;
+    G.dx_sign = G.swap ? -1 : 1;
+    G.angle = P32_0_15;
+    document.getElementById('hscore').textContent = 'Human: ' + (G.swap ? G.rscore : G.lscore);
+    document.getElementById('ascore').textContent = 'AI: ' + (G.swap ? G.lscore : G.rscore);
+}
+
+function ai_move() {
+    const by = p_to_y(G.by);
+    const ap = G.swap ? 'lpad' : 'rpad';
+    const mid = G[ap] + PADDLE_H/2;
+    if (mid < by && G[ap] < H - PADDLE_H - 2) G[ap]++;
+    if (mid > by && G[ap] > 2)                G[ap]--;
+}
+
+function update_info() {
+    const sin_v = posit32_sin_pi(G.angle);
+    const cos_v = posit32_cos_pi(G.angle);
+    const sf = posit32_to_float(sin_v);
+    const cf = posit32_to_float(cos_v);
+    const deg = Math.round(Math.atan2(-sf * G.dy_sign, cf * G.dx_sign) * 180 / Math.PI);
+    const bx_q = posit_to_q16(G.bx);
+    const in_coarse = bx_q < 6553 || bx_q > 58982;
+    const info = document.getElementById('info');
+    if (in_coarse)
+        info.innerHTML = '<span class="coarse">★ COARSE ZONE — large posit32 steps — aim here to beat AI ★</span>';
+    else
+        info.innerHTML = `<span class="smooth">angle=${deg}°</span>  sin=${sf.toFixed(4)}  cos=${cf.toFixed(4)}  [smooth zone]`;
+
+    document.getElementById('posit-display').textContent =
+        `angle=0x${G.angle.toString(16).padStart(8,'0')}  bx=0x${G.bx.toString(16).padStart(8,'0')}  frame=${G.frame}`;
+}
+
+/* keyboard */
+const keys = {};
+document.addEventListener('keydown', e => {
+    keys[e.key] = true;
+    if (e.key === ' ') { e.preventDefault(); G.paused = !G.paused; }
+    if (e.key === 't' || e.key === 'T') G.swap = !G.swap;
+    if (e.key === 'r' || e.key === 'R') {
+        G.lscore = 0; G.rscore = 0; reset_ball();
+    }
+});
+document.addEventListener('keyup', e => { keys[e.key] = false; });
+
+/* touch controls */
+let touch_start_y = 0;
+canvas.addEventListener('touchstart', e => {
+    touch_start_y = e.touches[0].clientY; e.preventDefault(); }, {passive:false});
+canvas.addEventListener('touchmove', e => {
+    const dy = e.touches[0].clientY - touch_start_y;
+    const hp = G.swap ? 'rpad' : 'lpad';
+    G[hp] = Math.max(2, Math.min(H-PADDLE_H-2, G[hp] + dy * 0.3));
+    touch_start_y = e.touches[0].clientY; e.preventDefault(); }, {passive:false});
+
+/* game loop */
+function loop() {
+    if (!G.paused && G.running) {
+        /* human paddle */
+        const hp = G.swap ? 'rpad' : 'lpad';
+        if ((keys['w'] || keys['W'] || keys['ArrowUp'])    && G[hp] > 2)              G[hp]--;
+        if ((keys['s'] || keys['S'] || keys['ArrowDown']) && G[hp] < H-PADDLE_H-2) G[hp]++;
+
+        move_ball();
+        ai_move();
+
+        /* angle drift */
+        if (G.frame % 3 === 0) G.angle = p_add(G.angle, P32_0_001);
+
+        G.frame++;
+        document.getElementById('hscore').textContent = 'Human: ' + (G.swap ? G.rscore : G.lscore);
+        document.getElementById('ascore').textContent = 'AI: ' + (G.swap ? G.lscore : G.rscore);
+    }
+    update_info();
+    draw();
+    requestAnimationFrame(loop);
+}
+
+document.getElementById('startbtn').addEventListener('click', () => {
+    G.running = true;
+    document.getElementById('startbtn').textContent = 'RESTART';
+    reset_ball();
+});
+
+loop();
+</script>
+</body>
+</html>
