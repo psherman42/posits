@@ -110,6 +110,10 @@ static void quire32_add_bit(quire32_t *q, int qbit, int neg) {
  * We place each set bit exactly -- no approximation.
  * This is the "one rounding at the end" guarantee.             */
 
+/* TODO: quire32_add_posit(quire32_t *q, uint32_t p) -- integer-only API
+ * Decode posit32 bits directly to fixed-point, accumulate without double.
+ * Required for FE310 (no FPU) and Tapered Pong Layer 4.
+ * Natural next step after bquire32_int.h -- Bola Odusote 2026.    */
 static void quire32_add(quire32_t *q, double v) {
     int exp, neg, b;
     double mant;
