@@ -201,11 +201,18 @@ static void render(void){
     double sy = -posit_to_double(sin_v) * G.dy_sign;
     int deg = (int)(atan2(sy, sx) * 180.0 / 3.14159265);
     if(deg < -180) deg += 360;
+    /* COARSE ZONE: ball in low-precision region of posit32
+     * Step size large -- ball jumps past AI. Not a bug. That's the point.
+     * Human who knows posit32 tapered precision can exploit this to win. */
+    int32_t bx_q = posit_to_q16(G.bx);
+    int in_coarse = (bx_q < 6553 || bx_q > 58982);  /* < 0.1 or > 0.9 */
     snprintf(info, sizeof(info),
-             " angle=%3d°  sin=%+.4f  cos=%+.4f  [Tapered Pong: smooth center, coarse edges -- posit32 precision]",
+             " angle=%3d\xc2\xb0  sin=%+.4f  cos=%+.4f  %s",
              deg,
              posit_to_double(sin_v),
-             posit_to_double(cos_v));
+             posit_to_double(cos_v),
+             in_coarse ? "*** COARSE ZONE -- large posit32 steps ***" :
+                         "[Tapered Pong: smooth center, coarse edges]");
     /* print below board */
 
     /* move cursor to top, draw */
