@@ -225,14 +225,12 @@ static void move_ball(void){
     uint32_t cos_v = rv32i_cos_pi56(G.angle);
 
     /* step size */
-    uint32_t step_x = posit_from_double(ANGLE_STEP_X);
-    uint32_t step_y = posit_from_double(ANGLE_STEP_Y);
-
-    /* dx = cos(pi*angle) * step, dy = sin(pi*angle) * step */
-    uint32_t dx = posit_from_double(
-        fabs(posit_to_double(cos_v)) * ANGLE_STEP_X);
-    uint32_t dy = posit_from_double(
-        fabs(posit_to_double(sin_v)) * ANGLE_STEP_Y);
+    /* dx = |cos| * step_x, dy = |sin| * step_y
+     * use signed posit Q16 -- negate if sign bit set  */
+    int32_t qcos = posit_to_q16(cos_v & 0x7fffffffu);  /* magnitude */
+    int32_t qsin = posit_to_q16(sin_v & 0x7fffffffu);  /* magnitude */
+    uint32_t dx = q16_to_posit32((int32_t)((int64_t)qcos * posit_to_q16(P32_STEP_X) >> 16));
+    uint32_t dy = q16_to_posit32((int32_t)((int64_t)qsin * posit_to_q16(P32_STEP_Y) >> 16));
 
     /* move */
     if(G.dx_sign > 0) G.bx = p_add(G.bx, dx);
@@ -244,8 +242,8 @@ static void move_ball(void){
     int by = p_to_y(G.by);
 
     /* wall bounce top/bottom */
-    if(by <= 1)   { G.dy_sign =  1; G.by = posit_from_double(0.08); G.angle = posit_from_double(posit_to_double(G.angle) + 0.03 + (G.frame%7)*0.01); }
-    if(by >= H-2) { G.dy_sign = -1; G.by = posit_from_double(0.92); G.angle = posit_from_double(posit_to_double(G.angle) - 0.03 - (G.frame%5)*0.01); }
+    if(by <= 1)   { G.dy_sign =  1; G.by = P32_0_08; G.angle = p_add_int(G.angle, P32_0_03); }
+    if(by >= H-2) { G.dy_sign = -1; G.by = P32_0_92; G.angle = p_sub_int(G.angle, P32_0_03); }
 
     /* paddle collision
      * lpad always on left side of screen
@@ -257,14 +255,16 @@ static void move_ball(void){
     if(bx <= 2){
         if(by >= G.lpad && by < G.lpad + PADDLE){
             G.dx_sign = 1;
-            double hit = (double)(by - G.lpad) / PADDLE;
-            G.angle = posit_from_double(0.1 + hit * 0.4);
+            int hit_q = ((by - G.lpad) * 65536) / PADDLE;  /* Q16 hit position */
+            G.angle = p_add_int(P32_0_10, q16_to_posit32((int32_t)((int64_t)hit_q * posit_to_q16(P32_0_40) >> 16)));
         } else {
             if(G.swap) G.lscore++; else G.rscore++;
-            G.bx = posit_from_double(0.5);
-            G.by = posit_from_double(0.5);
+            render();
+            { struct timespec ts = {0, 500000000}; nanosleep(&ts, NULL); }
+            G.bx = P32_HALF;
+            G.by = P32_HALF;
             G.dx_sign = 1;
-            G.angle = posit_from_double(0.15);
+            G.angle = P32_0_15;
         }
     }
 
@@ -272,14 +272,16 @@ static void move_ball(void){
     if(bx >= W-3){
         if(by >= G.rpad && by < G.rpad + PADDLE){
             G.dx_sign = -1;
-            double hit = (double)(by - G.rpad) / PADDLE;
-            G.angle = posit_from_double(0.6 + hit * 0.4);
+            int hit_q = ((by - G.rpad) * 65536) / PADDLE;  /* Q16 hit position */
+            G.angle = p_add_int(P32_0_60, q16_to_posit32((int32_t)((int64_t)hit_q * posit_to_q16(P32_0_40) >> 16)));
         } else {
             if(G.swap) G.rscore++; else G.lscore++;
-            G.bx = posit_from_double(0.5);
-            G.by = posit_from_double(0.5);
+            render();
+            { struct timespec ts = {0, 500000000}; nanosleep(&ts, NULL); }
+            G.bx = P32_HALF;
+            G.by = P32_HALF;
             G.dx_sign = -1;
-            G.angle = posit_from_double(0.65);
+            G.angle = P32_0_65;
         }
     }
 }
@@ -287,10 +289,19 @@ static void move_ball(void){
 /* ---- AI paddle ---- */
 static void ai_move(void){
     int by = p_to_y(G.by);
-    /* AI controls rpad (swap=0) or lpad (swap=1) */
+    int mid = G.rpad + PADDLE/2;
+    /* Reactive AI: follows ball every frame -- wastes motion but always correct.
+     *
+     * TODO: Predictive AI -- when ball leaves human paddle, compute trajectory
+     * using rv32i_sin_pi56/cos_pi56, move once to predicted arrival point, wait.
+     * Prediction accuracy limited by posit32 tapered precision:
+     *   smooth side (high precision): near-perfect prediction
+     *   coarse side (low precision):  quantization errors cause misses
+     * Human can exploit coarse region to defeat prediction -- Chat's Precision Trap.
+     * Mode toggle: [p] = reactive, [P] = predictive (future feature)          */
     int *ap = G.swap ? &G.lpad : &G.rpad;
-    int mid = *ap + PADDLE/2;
-    if(mid < by && *ap < H-1-PADDLE) (*ap)++;
+    mid = *ap + PADDLE/2;
+    if(mid < by && *ap < H-1-PADDLE) (*ap)++;  /* H-2-PADDLE to leave one row gap */
     if(mid > by && *ap > 1)          (*ap)--;
 }
 
@@ -299,9 +310,9 @@ int main(void){
     positenv_init(32,2);
 
     /* init game state */
-    G.bx     = posit_from_double(0.5);
-    G.by     = posit_from_double(0.5);
-    G.angle  = posit_from_double(0.15);
+    G.bx     = P32_HALF;
+    G.by     = P32_HALF;
+    G.angle  = P32_0_15;
     G.dx_sign = 1;
     G.dy_sign = 1;
     G.lpad   = H/2 - PADDLE/2;
@@ -327,8 +338,7 @@ int main(void){
         render();
         /* drift angle slightly every frame -- shows live posit32 */
         if(!G.paused && G.frame % 3 == 0)
-            G.angle = posit_from_double(
-                fmod(posit_to_double(G.angle) + 0.001, 2.0));
+            G.angle = p_add_int(G.angle, P32_0_001);
         G.frame++;
 
         /* ~30fps */
