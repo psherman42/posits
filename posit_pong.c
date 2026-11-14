@@ -10,7 +10,7 @@
  * See layers below for the roadmap.
  *
  * Layer 0 (done): playable prototype -- posit32 CORDIC drives ball angle
- * Layer 1 (todo): integer p_to_x/p_to_y -- posit32 to screen coords
+ * Layer 1 (done): integer p_to_x/p_to_y -- posit32 to screen coords (posit_q16.h)
  * Layer 2 (todo): integer p_add/p_sub -- posit32 arithmetic, no double
  * Layer 3 (todo): integer-only build -- no math.h, no double anywhere
  *
@@ -38,6 +38,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include "positenc.h"
+#include "posit_q16.h"
 
 /* RV32I assembly CORDIC */
 extern uint32_t rv32i_sin_pi56(uint32_t x);
@@ -110,18 +111,29 @@ static int p_to_fixed(uint32_t p, int scale){
     return (int)(r >> POSIT_SHIFT);
 }
 
+static int p_to_bx(uint32_t p){
+    /* collision coordinate -- never flipped, always posit space */
+    int32_t q = posit_to_q16(p);
+    int x = (int)((q * (W-2)) >> 16) + 1;
+    if(x < 1)   x = 1;
+    if(x > W-2) x = W-2;
+    return x;
+}
+
 static int p_to_x(uint32_t p){
-    double d = posit_to_double(p);
-    if(G.swap) d = 1.0 - d;    /* t=toggle: flip for human on smooth side */
-    int x = (int)(d * (W-2)) + 1;
+    /* Layer 1: integer posit32 to screen coordinate -- no double */
+    int32_t q = posit_to_q16(p);         /* q in [0, 65536] */
+    if(G.swap) q = 65536 - q;            /* flip for smooth side */
+    int x = (int)((q * (W-2)) >> 16) + 1;
     if(x < 1)   x = 1;
     if(x > W-2) x = W-2;
     return x;
 }
 
 static int p_to_y(uint32_t p){
-    double d = posit_to_double(p);
-    int y = (int)(d * (H-2)) + 1;
+    /* Layer 1: integer posit32 to screen coordinate -- no double */
+    int32_t q = posit_to_q16(p);         /* q in [0, 65536] */
+    int y = (int)((q * (H-2)) >> 16) + 1;
     if(y < 1)   y = 1;
     if(y > H-2) y = H-2;
     return y;
@@ -232,7 +244,7 @@ static void move_ball(void){
     if(G.dy_sign > 0) G.by = p_add(G.by, dy);
     else              G.by = p_sub(G.by, dy);
 
-    int bx = p_to_x(G.bx);
+    int bx = p_to_bx(G.bx);  /* collision -- unflipped */
     int by = p_to_y(G.by);
 
     /* wall bounce top/bottom */
