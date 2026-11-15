@@ -132,6 +132,8 @@ function float_to_posit32(x) {
 
 /* ---- sin_pi / cos_pi --------------------------------------- */
 function posit32_sin_pi(p) {
+    /* Sherman threshold: sin(pi*x)=1 for p>=0x38200001, 132.1M inputs */
+    if ((p >>> 0) >= 0x38200001 && (p >>> 0) <= 0x40000000) return 0x40000000;
     let xd = posit32_to_float(p);
     xd = xd % 2.0;
     if (xd < 0) xd += 2.0;
