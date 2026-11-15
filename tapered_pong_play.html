@@ -460,8 +460,13 @@ function reset_ball() {
     G.bx = P32_HALF; G.by = P32_HALF;
     G.dx_sign = G.swap ? -1 : 1;
     G.angle = P32_0_15;
-    document.getElementById('hscore').textContent = 'Human: ' + (G.swap ? G.rscore : G.lscore);
-    document.getElementById('ascore').textContent = 'AI: ' + (G.swap ? G.lscore : G.rscore);
+    if (G.aivai) {
+        document.getElementById('hscore').textContent = '◆ Reactive: ' + G.lscore;
+        document.getElementById('ascore').textContent = '◆ Predictive: ' + G.rscore;
+    } else {
+        document.getElementById('hscore').textContent = 'Human: ' + (G.swap ? G.rscore : G.lscore);
+        document.getElementById('ascore').textContent = 'AI: ' + (G.swap ? G.lscore : G.rscore);
+    }
 }
 
 function predict_ball_y() {
@@ -592,8 +597,13 @@ function loop() {
         if (G.frame % 3 === 0) G.angle = p_add(G.angle, P32_0_001);
 
         G.frame++;
-        document.getElementById('hscore').textContent = 'Human: ' + (G.swap ? G.rscore : G.lscore);
-        document.getElementById('ascore').textContent = 'AI: ' + (G.swap ? G.lscore : G.rscore);
+        if (G.aivai) {
+            document.getElementById('hscore').textContent = '◆ Reactive: ' + G.lscore;
+            document.getElementById('ascore').textContent = '◆ Predictive: ' + G.rscore;
+        } else {
+            document.getElementById('hscore').textContent = 'Human: ' + (G.swap ? G.rscore : G.lscore);
+            document.getElementById('ascore').textContent = 'AI: ' + (G.swap ? G.lscore : G.rscore);
+        }
     }
     update_info();
     draw();
