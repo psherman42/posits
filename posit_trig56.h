@@ -339,10 +339,6 @@ static uint32_t posit32_cos_pi56(uint32_t x) {
 
 static uint32_t posit32_sin_pi56(uint32_t x) {
 
-    /* Sherman threshold: sin(pi*x)=1 for p>=0x38200001, 132.1M inputs (6.2%)
-     * Derived from exhaustive scan -- symmetric to Gustafson cos threshold.
-     * Combined savings: 203.8M inputs (13.8% of [0,1/2]).                  */
-    if (x >= 0x38200001u && x <= 0x40000000u) return 0x40000000u;
     double xd = posit_to_double(x);
     int neg = 0;
 
@@ -363,6 +359,7 @@ static uint32_t posit32_sin_pi56(uint32_t x) {
     else if (xd < 1.0 + QB) { xd = 1.0 - xd;  neg = 0; }
     else if (xd < 1.5 + QB) { xd = xd - 1.0;  neg = 1; }
     else                    { xd = 2.0 - xd;  neg = 1; }
+
 
     /* near x=0: sin(pi*x) ≈ pi*x -- Taylor series
      * accurate to posit32 ULP for x < 0.044
