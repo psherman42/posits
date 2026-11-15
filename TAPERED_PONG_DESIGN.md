@@ -137,3 +137,37 @@ can deliver it. Only playing the game can.
 - Integer CORDIC on RV32I: Paul Sherman, Claude, Nov 2026
 
 Volder 1959. Gustafson 2026. Woz smiles 2026.
+
+---
+
+## AI vs AI — Observed Behavior (Nov 2026)
+
+In practice, Predictive AI wins in AI-vs-AI mode:
+- Accurate trajectory in smooth zone (center of court)
+- 33x fewer moves than Reactive
+- Nearly perfect prediction where posit32 precision is high
+
+But this is misleading. The real test is Human vs Predictive AI.
+
+A human who deliberately aims for the coarse zone defeats Predictive easily:
+- Coarse zone quantization errors corrupt the trajectory calculation
+- Predictive commits to a wrong position and waits there confidently
+- "A bad prediction can be confidently wrong" -- ChatGPT, Nov 2026
+
+AI-vs-AI doesn't naturally explore the coarse zone, so Predictive appears
+dominant. The interesting experiment is to give the human the coarse side
+(swap=0, default) and watch them discover and exploit the Precision Trap
+against a Predictive opponent.
+
+## Gustafson and Sherman Thresholds (Nov 2026)
+
+cos(πx) = 1.0 exactly for p ≤ 0x0445f306 -- 71.7M inputs, 7.6%
+J.L. Gustafson, personal communication, SC26, Nov 2026
+
+sin(πx) = 1.0 exactly for p ≥ 0x38200001 -- 132.1M inputs, 6.2%
+P. Sherman, derived from exhaustive scan, Nov 2026
+
+Combined: 203.8M free correct answers, 13.8% of positive posit32 [0,1/2]
+
+
+Applied to master, rv32i-asm, js, posit_cordic.js, tapered_pong_play.html.
