@@ -111,7 +111,7 @@ button:hover { background: var(--accent); color: var(--bg); }
 </div>
 
 <div class="controls">
-  W/S or ↑/↓ = paddle &nbsp;·&nbsp; T = swap &nbsp;·&nbsp; A = AI-vs-AI &nbsp;·&nbsp; Space = pause &nbsp;·&nbsp; R = restart
+  W/S or ↑/↓ = paddle &nbsp;·&nbsp; T = swap &nbsp;·&nbsp; A = AI-vs-AI &nbsp;·&nbsp; M = AI mode &nbsp;·&nbsp; Space = pause &nbsp;·&nbsp; R = restart
 </div>
 <button id="startbtn">START</button>
 
@@ -524,11 +524,31 @@ function ai_move() {
         if (diff > 3  && G.rpad < H - PADDLE_H - 2) G.rpad += 3;
         if (diff < -3 && G.rpad > 2)                G.rpad -= 3;
     } else {
-        /* normal mode -- single reactive AI */
+        /* normal mode -- ai_mode determines strategy */
         const ap = G.swap ? 'lpad' : 'rpad';
-        const mid = G[ap] + PADDLE_H/2;
-        if (mid < by && G[ap] < H - PADDLE_H - 2) G[ap] += 3;
-        if (mid > by && G[ap] > 2)                G[ap] -= 3;
+        let effective_mode = G.ai_mode;
+        if (G.ai_mode === 'stealth') {
+            /* stealth: switch every N serves silently */
+            if (G.frame % (30 * G.stealth_countdown) === 0) {
+                effective_mode = Math.random() < 0.5 ? 'reactive' : 'predictive';
+                G._stealth_current = effective_mode;
+            }
+            effective_mode = G._stealth_current || 'reactive';
+        }
+        if (effective_mode === 'predictive') {
+            if (G.dx_sign > 0 && G.frame % 30 === 0) {
+                const pred = predict_ball_y();
+                if (pred > 0) G.pred_target = pred;
+            }
+            const mid = G[ap] + PADDLE_H/2;
+            const diff = G.pred_target - mid;
+            if (diff > 3  && G[ap] < H - PADDLE_H - 2) G[ap] += 3;
+            if (diff < -3 && G[ap] > 2)                G[ap] -= 3;
+        } else {
+            const mid = G[ap] + PADDLE_H/2;
+            if (mid < by && G[ap] < H - PADDLE_H - 2) G[ap] += 3;
+            if (mid > by && G[ap] > 2)                G[ap] -= 3;
+        }
     }
 }
 
@@ -543,8 +563,15 @@ function update_info() {
     const info = document.getElementById('info');
     if (G.aivai)
         info.innerHTML = `<span style="color:#ffd700">◆ REACTIVE</span> follows truth every frame &nbsp;·&nbsp; <span style="color:#e0e0ff">◆ PREDICTIVE</span> one calculation, then waits &nbsp;·&nbsp; ${in_coarse ? '<span class="coarse">COARSE ZONE</span>' : 'smooth zone'}`;
-    else if (in_coarse)
-        info.innerHTML = '<span class="coarse">★ COARSE ZONE — large posit32 steps — aim here to beat AI ★</span>';
+    else {
+        const mode_label = G.ai_mode === 'stealth' ? '<span style="color:#ff9900">AI: ???</span>' :
+                           G.ai_mode === 'predictive' ? '<span style="color:#e0e0ff">AI: PREDICTIVE</span>' :
+                           '<span style="color:#ffd700">AI: REACTIVE</span>';
+        if (in_coarse)
+            info.innerHTML = mode_label + ' &nbsp;·&nbsp; <span class="coarse">★ COARSE ZONE ★</span>';
+        else
+            info.innerHTML = mode_label + ` &nbsp;·&nbsp; angle=${deg}°  sin=${sf.toFixed(4)}  cos=${cf.toFixed(4)}`;
+    }
     else
         info.innerHTML = `<span class="smooth">angle=${deg}°</span>  sin=${sf.toFixed(4)}  cos=${cf.toFixed(4)}  [smooth zone]`;
 
@@ -564,6 +591,12 @@ document.addEventListener('keydown', e => {
     if (e.key === ' ') { e.preventDefault(); G.paused = !G.paused; }
     if (e.key === 't' || e.key === 'T') G.swap = !G.swap;
     if (e.key === 'a' || e.key === 'A') { G.aivai = !G.aivai; G.reactive_moves = 0; G.predictive_moves = 0; }
+    if (e.key === 'm' || e.key === 'M') {
+        const modes = ['reactive','predictive','stealth'];
+        const i = modes.indexOf(G.ai_mode);
+        G.ai_mode = modes[(i+1) % modes.length];
+        G.pred_target = H/2;
+    }
     if (e.key === 'r' || e.key === 'R') {
         G.lscore = 0; G.rscore = 0; reset_ball();
     }
