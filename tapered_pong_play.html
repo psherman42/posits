@@ -231,6 +231,8 @@ function posit32_sin_pi(p) {
 }
 
 function posit32_cos_pi(p) {
+    /* Gustafson threshold: cos(pi*x)=1 for p<=0x0445f306, 71.7M inputs */
+    if ((p >>> 0) <= 0x0445f306) return 0x40000000;
     let xd = posit32_to_float(p);
     xd = ((xd % 2.0) + 2.0) % 2.0;
     let neg = false;
@@ -502,12 +504,14 @@ document.addEventListener('keyup', e => { keys[e.key] = false; });
 
 /* touch controls */
 let touch_start_y = 0;
-canvas.addEventListener('touchstart', e => {
+/* touch control -- whole document, left half = human paddle, right half = nothing
+   finger never needs to be on the court */
+document.addEventListener('touchstart', e => {
     touch_start_y = e.touches[0].clientY; e.preventDefault(); }, {passive:false});
-canvas.addEventListener('touchmove', e => {
+document.addEventListener('touchmove', e => {
     const dy = e.touches[0].clientY - touch_start_y;
     const hp = G.swap ? 'rpad' : 'lpad';
-    G[hp] = Math.max(2, Math.min(H-PADDLE_H-2, G[hp] + dy * 0.3));
+    G[hp] = Math.max(2, Math.min(H-PADDLE_H-2, G[hp] + dy * 2.5));
     touch_start_y = e.touches[0].clientY; e.preventDefault(); }, {passive:false});
 
 /* game loop */

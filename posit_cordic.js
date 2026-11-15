@@ -147,6 +147,8 @@ function posit32_sin_pi(p) {
 }
 
 function posit32_cos_pi(p) {
+    /* Gustafson threshold: cos(pi*x)=1 for p<=0x0445f306, 71.7M inputs */
+    if ((p >>> 0) <= 0x0445f306) return 0x40000000;
     let xd = posit32_to_float(p);
     xd = xd % 2.0;
     if (xd < 0) xd += 2.0;
