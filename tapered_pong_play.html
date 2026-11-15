@@ -111,7 +111,7 @@ button:hover { background: var(--accent); color: var(--bg); }
 </div>
 
 <div class="controls">
-  W/S or ↑/↓ = paddle &nbsp;·&nbsp; T = swap sides &nbsp;·&nbsp; Space = pause &nbsp;·&nbsp; R = restart
+  W/S or ↑/↓ = paddle &nbsp;·&nbsp; T = swap &nbsp;·&nbsp; A = AI-vs-AI &nbsp;·&nbsp; Space = pause &nbsp;·&nbsp; R = restart
 </div>
 <button id="startbtn">START</button>
 
@@ -464,12 +464,67 @@ function reset_ball() {
     document.getElementById('ascore').textContent = 'AI: ' + (G.swap ? G.lscore : G.rscore);
 }
 
+function predict_ball_y() {
+    /* predict where ball will be when it reaches right side (x~=W)
+     * uses posit32 Q16 integer arithmetic -- same as game engine    */
+    let bx_q = posit_to_q16(G.bx);
+    let by_q = posit_to_q16(G.by);
+    const sin_v = posit32_sin_pi(G.angle);
+    const cos_v = posit32_cos_pi(G.angle);
+    const qsin = posit_to_q16(sin_v & 0x7fffffff);
+    const qcos = posit_to_q16(cos_v & 0x7fffffff);
+    const dx_q = Math.round(qcos * posit_to_q16(P32_STEP_X) / 65536);
+    const dy_q = Math.round(qsin * posit_to_q16(P32_STEP_Y) / 65536);
+    let dx_sign = G.dx_sign, dy_sign = G.dy_sign;
+    /* simulate until ball reaches right side */
+    for (let i = 0; i < 500; i++) {
+        if (dx_sign > 0) bx_q = Math.min(65536, bx_q + dx_q);
+        else             bx_q = Math.max(0, bx_q - dx_q);
+        if (dy_sign > 0) by_q = Math.min(65536, by_q + dy_q);
+        else             by_q = Math.max(0, by_q - dy_q);
+        /* wall bounce */
+        const by_screen = Math.round(by_q * (H-2) / 65536) + 1;
+        if (by_screen <= 2)   { dy_sign =  1; by_q = posit_to_q16(P32_0_08); }
+        if (by_screen >= H-3) { dy_sign = -1; by_q = posit_to_q16(P32_0_92); }
+        /* reached right side? */
+        const bx_screen = Math.round(bx_q * (W-2) / 65536) + 1;
+        if (bx_screen >= W - PADDLE_W - 5) {
+            return Math.round(by_q * (H-2) / 65536) + 1;
+        }
+        if (bx_screen <= PADDLE_W + 4 && dx_sign < 0) return -1; /* going left */
+    }
+    return H/2; /* fallback */
+}
+
 function ai_move() {
     const by = p_to_y(G.by);
-    const ap = G.swap ? 'lpad' : 'rpad';
-    const mid = G[ap] + PADDLE_H/2;
-    if (mid < by && G[ap] < H - PADDLE_H - 2) G[ap] += 3;
-    if (mid > by && G[ap] > 2)                G[ap] -= 3;
+
+    if (G.aivai) {
+        /* LEFT = Reactive AI (gold) -- follows every frame */
+        const mid_l = G.lpad + PADDLE_H/2;
+        if (mid_l < by && G.lpad < H - PADDLE_H - 2) { G.lpad += 3; G.reactive_moves++; }
+        if (mid_l > by && G.lpad > 2)                { G.lpad -= 3; G.reactive_moves++; }
+
+        /* RIGHT = Predictive AI (white) -- moves only when ball served or bounced off left */
+        /* update prediction only when ball moving toward right */
+        if (G.dx_sign > 0 && G.frame % 30 === 0) {
+            const pred = predict_ball_y();
+            if (pred > 0) {
+                G.pred_target = pred;
+                G.predictive_moves++;
+            }
+        }
+        const mid_r = G.rpad + PADDLE_H/2;
+        const diff = G.pred_target - mid_r;
+        if (diff > 3  && G.rpad < H - PADDLE_H - 2) G.rpad += 3;
+        if (diff < -3 && G.rpad > 2)                G.rpad -= 3;
+    } else {
+        /* normal mode -- single reactive AI */
+        const ap = G.swap ? 'lpad' : 'rpad';
+        const mid = G[ap] + PADDLE_H/2;
+        if (mid < by && G[ap] < H - PADDLE_H - 2) G[ap] += 3;
+        if (mid > by && G[ap] > 2)                G[ap] -= 3;
+    }
 }
 
 function update_info() {
@@ -481,13 +536,20 @@ function update_info() {
     const bx_q = posit_to_q16(G.bx);
     const in_coarse = bx_q < 6553 || bx_q > 58982;
     const info = document.getElementById('info');
-    if (in_coarse)
+    if (G.aivai)
+        info.innerHTML = `<span style="color:#ffd700">◆ REACTIVE</span> follows truth every frame &nbsp;·&nbsp; <span style="color:#e0e0ff">◆ PREDICTIVE</span> one calculation, then waits &nbsp;·&nbsp; ${in_coarse ? '<span class="coarse">COARSE ZONE</span>' : 'smooth zone'}`;
+    else if (in_coarse)
         info.innerHTML = '<span class="coarse">★ COARSE ZONE — large posit32 steps — aim here to beat AI ★</span>';
     else
         info.innerHTML = `<span class="smooth">angle=${deg}°</span>  sin=${sf.toFixed(4)}  cos=${cf.toFixed(4)}  [smooth zone]`;
 
-    document.getElementById('posit-display').textContent =
-        `angle=0x${G.angle.toString(16).padStart(8,'0')}  bx=0x${G.bx.toString(16).padStart(8,'0')}  frame=${G.frame}`;
+    if (G.aivai) {
+        document.getElementById('posit-display').textContent =
+            `REACTIVE moves:${G.reactive_moves}  PREDICTIVE moves:${G.predictive_moves}  pred_target:${G.pred_target}  frame:${G.frame}`;
+    } else {
+        document.getElementById('posit-display').textContent =
+            `angle=0x${G.angle.toString(16).padStart(8,'0')}  bx=0x${G.bx.toString(16).padStart(8,'0')}  frame=${G.frame}`;
+    }
 }
 
 /* keyboard */
@@ -496,6 +558,7 @@ document.addEventListener('keydown', e => {
     keys[e.key] = true;
     if (e.key === ' ') { e.preventDefault(); G.paused = !G.paused; }
     if (e.key === 't' || e.key === 'T') G.swap = !G.swap;
+    if (e.key === 'a' || e.key === 'A') { G.aivai = !G.aivai; G.reactive_moves = 0; G.predictive_moves = 0; }
     if (e.key === 'r' || e.key === 'R') {
         G.lscore = 0; G.rscore = 0; reset_ball();
     }
