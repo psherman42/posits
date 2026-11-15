@@ -572,9 +572,6 @@ function update_info() {
         else
             info.innerHTML = mode_label + ` &nbsp;·&nbsp; angle=${deg}°  sin=${sf.toFixed(4)}  cos=${cf.toFixed(4)}`;
     }
-    else
-        info.innerHTML = `<span class="smooth">angle=${deg}°</span>  sin=${sf.toFixed(4)}  cos=${cf.toFixed(4)}  [smooth zone]`;
-
     if (G.aivai) {
         document.getElementById('posit-display').textContent =
             `REACTIVE moves:${G.reactive_moves}  PREDICTIVE moves:${G.predictive_moves}  pred_target:${G.pred_target}  frame:${G.frame}`;
