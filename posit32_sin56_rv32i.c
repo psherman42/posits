@@ -38,10 +38,6 @@ uint32_t rv32i_sin_pi56(uint32_t x)
     for (_i = 0; _i < N_SIN_PI_HARD; _i++)
         if (_sin_pi_hard[_i][0] == x) return _sin_pi_hard[_i][1];
 
-    /* Sherman threshold: sin(pi*x)=1 for p>=0x38200001, 132.1M inputs (6.2%)
-     * Derived from exhaustive scan -- symmetric to Gustafson cos threshold.
-     * Combined savings: 203.8M inputs (13.8% of [0,1/2]).                  */
-    if (x >= 0x38200001u && x <= 0x40000000u) return 0x40000000u;
 
     /* posit32 decode */
     double xd = posit_to_double(x);
