@@ -101,6 +101,10 @@ uint32_t rv32i_cos_pi56(uint32_t x)
     for (_i = 0; _i < N_COS_PI_HARD; _i++)
         if (_cos_pi_hard[_i][0] == x) return _cos_pi_hard[_i][1];
 
+
+    /* Gustafson threshold: cos(pi*x) rounds to 1 for p <= 0x0445f306
+     * ~71.7M inputs require no computation. J.L. Gustafson, Nov 2026. */
+    if (x <= 0x0445f306u) return 0x40000000u;
     /* posit32 decode */
     double xd = posit_to_double(x);
 
