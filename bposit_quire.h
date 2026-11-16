@@ -47,7 +47,7 @@
 
 #include <stdint.h>
 #include <string.h>
-#include <math.h>
+
 
 /* -- B-posit parameters ---------------------------------------- */
 /* Candidate design point from Warsy et al.: es=2, rs=6, n=32   */
@@ -134,86 +134,6 @@ static void bquire_add_bit(bquire_t *q, int qbit, int neg) {
 /* Binary point at bit (BPOSIT_QSIZE/2) from MSB.
  * 1.0 sits at bit (BPOSIT_QSIZE/2 - 1) from MSB.
  * M's MSB (bit 52) at quire bit (BPOSIT_QSIZE/2 - exp).        */
-
-static void bquire_add(bquire_t *q, double v) {
-    int exp, neg, b;
-    double mant;
-    uint64_t M;
-    int half = BPOSIT_QSIZE / 2;
-
-    if (v != v) { q->nar = 1; return; }
-    if (v == 0.0) return;
-
-    neg  = (v < 0.0);
-    mant = frexp(fabs(v), &exp);
-    M    = (uint64_t)(mant * (double)(1ULL << 53));
-
-    for (b = 52; b >= 0; b--) {
-        if ((M >> b) & 1) {
-            int qbit = half - exp + (52 - b);
-            bquire_add_bit(q, qbit, neg);
-        }
-    }
-}
-
-static void bquire_fma(bquire_t *q, double a, double b) {
-    if (a != a || b != b) { q->nar = 1; return; }
-    bquire_add(q, a * b);
-}
-
-/* -- round B-posit quire to double ---------------------------- */
-
-static double bquire_round(bquire_t *q) {
-    int i, b;
-    uint32_t mag[BPOSIT_QWORDS];
-    uint64_t carry;
-    int sign, half;
-    double result;
-
-    if (q->nar) return 0.0 / 0.0;
-
-    sign = (q->w[0] >> 31) & 1;
-    if (sign) {
-        carry = 1;
-        for (i = BPOSIT_QWORDS-1; i >= 0; i--) {
-            carry += (uint64_t)(~q->w[i]);
-            mag[i] = (uint32_t)(carry & 0xFFFFFFFF);
-            carry >>= 32;
-        }
-    } else {
-        memcpy(mag, q->w, sizeof(mag));
-    }
-
-    half = BPOSIT_QSIZE / 2;
-    result = 0.0;
-    for (i = 0; i < BPOSIT_QWORDS; i++) {
-        if (mag[i]) {
-            for (b = 31; b >= 0; b--) {
-                if ((mag[i] >> b) & 1) {
-                    int e = half - 1 - (i*32 + (31-b));
-                    result += ldexp(1.0, e);
-                }
-            }
-        }
-    }
-    return sign ? -result : result;
-}
-
-/* -- drop-in for microuniversal.h ------------------------------ */
-
-static double bquire_dot(double *a, double *b, int n) {
-    bquire_t q; int i;
-    bquire_clear(&q);
-    for (i=0;i<n;i++) bquire_fma(&q,a[i],b[i]);
-    return bquire_round(&q);
-}
-
-static double bquire_sum(double *a, int n) {
-    bquire_t q; int i;
-    bquire_clear(&q);
-    for (i=0;i<n;i++) bquire_add(&q,a[i]);
-    return bquire_round(&q);
-}
 
 /* -- B-posit range helpers (pure integer, no FPU) ------------- */
 

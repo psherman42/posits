@@ -1,5 +1,5 @@
 #include <stdio.h>
-#include "bposit_quire.h"
+#include "bposit_quire_double.h"
 
 int main(void) {
     bquire_t q; int i; double r;
