@@ -6,7 +6,7 @@
 #define NTHREADS 64
 
 typedef struct { uint32_t start, end; } targ_t;
-static uint32_t fails[300];
+static uint32_t fails[500];
 static int nfails = 0;
 static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
 
@@ -17,11 +17,10 @@ void *scan(void *arg){
         if((int32_t)p < 0) continue;
         double ad = posit_to_double(p);
         double xd = fmod(ad, 2.0);
-        if(xd >= 0.044) continue;  /* only Taylor region */
         int32_t ulp = sin_pi56_ulp(p);
         if(ulp != 0){
             pthread_mutex_lock(&mu);
-            if(nfails < 300) fails[nfails++] = p;
+            if(nfails < 500) fails[nfails++] = p;
             pthread_mutex_unlock(&mu);
         }
     }
