@@ -78,6 +78,7 @@ static struct {
     int      frame;
     int      swap;      /* 1 = human on right (smooth side) */
     int      paused;    /* 1 = game paused */
+    int      ai_vs_ai;  /* 1 = both paddles AI */
 } G;
 
 /* ---- terminal raw mode ---- */
@@ -219,9 +220,10 @@ static void render(void){
     printf("\033[H");
     for(int y=0; y<H; y++) printf("%s\n", _buf[y]);
     printf("%s\n", info);
-    printf(" [w/s]=paddle [t]=swap [space]=pause [q]=quit  side=%s %s frame=%d\n",
+    printf(" [w/s]=paddle [t]=swap [a]=AI-vs-AI [space]=pause [q]=quit  side=%s %s%s frame=%d\n",
            G.swap?"smooth(right)":"coarse(left)",
            G.paused?"PAUSED":"      ",
+           G.ai_vs_ai?" AI-vs-AI":"         ",
            G.frame);
     fflush(stdout);
 }
@@ -294,22 +296,75 @@ static void move_ball(void){
     }
 }
 
+/* ---- predictive AI: simulate trajectory in Q16 integer ---- */
+static int predict_ball_y(void){
+    int bx_q = posit_to_q16(G.bx);
+    int by_q = posit_to_q16(G.by);
+    uint32_t sin_v = rv32i_sin_pi56(G.angle);
+    uint32_t cos_v = rv32i_cos_pi56(G.angle);
+    int qsin = posit_to_q16(sin_v & 0x7fffffffu);
+    int qcos = posit_to_q16(cos_v & 0x7fffffffu);
+    int dx_q = (qcos * posit_to_q16(P32_STEP_X)) >> 16;
+    int dy_q = (qsin * posit_to_q16(P32_STEP_Y)) >> 16;
+    int dx_sign = G.dx_sign, dy_sign = G.dy_sign;
+    int i, bx_screen, by_screen;
+
+    for(i = 0; i < 500; i++){
+        bx_q = dx_sign > 0 ? bx_q + dx_q : bx_q - dx_q;
+        by_q = dy_sign > 0 ? by_q + dy_q : by_q - dy_q;
+        if(bx_q > 65536) bx_q = 65536;
+        if(bx_q < 0)     bx_q = 0;
+        if(by_q > 65536) by_q = 65536;
+        if(by_q < 0)     by_q = 0;
+
+        by_screen = by_q * (H-2) / 65536 + 1;
+        bx_screen = bx_q * (W-2) / 65536 + 1;
+
+        if(by_screen <= 2)   { dy_sign =  1; by_q = posit_to_q16(P32_0_08); }
+        if(by_screen >= H-3) { dy_sign = -1; by_q = posit_to_q16(P32_0_92); }
+
+        if(bx_screen >= W - 5)              return by_screen;
+        if(bx_screen <= 4 && dx_sign < 0)   return -1;
+    }
+    return H/2;
+}
+
 /* ---- AI paddle ---- */
 static void ai_move(void){
-    int by = p_to_y(G.by);
-    int mid = G.rpad + PADDLE/2;
+    int by    = p_to_y(G.by);
+    int *ap   = G.swap ? &G.lpad : &G.rpad;
+    int mid   = *ap + PADDLE/2;
+
     /* Reactive AI: follows ball every frame -- wastes motion but always correct.
      *
-     * TODO: Predictive AI -- when ball leaves human paddle, compute trajectory
+     * Predictive AI -- when ball leaves human paddle, compute trajectory
      * using rv32i_sin_pi56/cos_pi56, move once to predicted arrival point, wait.
      * Prediction accuracy limited by posit32 tapered precision:
      *   smooth side (high precision): near-perfect prediction
      *   coarse side (low precision):  quantization errors cause misses
      * Human can exploit coarse region to defeat prediction -- Chat's Precision Trap.
      * Mode toggle: [p] = reactive, [P] = predictive (future feature)          */
-    int *ap = G.swap ? &G.lpad : &G.rpad;
-    mid = *ap + PADDLE/2;
-    if(mid < by && *ap < H-1-PADDLE) (*ap)++;  /* H-2-PADDLE to leave one row gap */
+    if(G.dx_sign > 0){
+        /* ball moving toward AI -- use prediction */
+        int pred = predict_ball_y();
+        if(pred > 0){
+            int pmid = *ap + PADDLE/2;
+            if(pmid < pred && *ap < H-1-PADDLE) (*ap)++;
+            if(pmid > pred && *ap > 1)          (*ap)--;
+            return;
+        }
+    }
+    /* ball moving away -- reactive fallback */
+    if(mid < by && *ap < H-1-PADDLE) (*ap)++;
+    if(mid > by && *ap > 1)          (*ap)--;
+}
+
+/* ---- AI paddle left (AI-vs-AI mode) ---- */
+static void ai_move_left(void){
+    int by = p_to_y(G.by);
+    int *ap = G.swap ? &G.rpad : &G.lpad;
+    int mid = *ap + PADDLE/2;
+    if(mid < by && *ap < H-1-PADDLE) (*ap)++;
     if(mid > by && *ap > 1)          (*ap)--;
 }
 
@@ -341,8 +396,9 @@ int main(void){
         if(ch == 's' && *hp < H-1-PADDLE) (*hp)++;
         if(ch == 't') G.swap = !G.swap;
         if(ch == 32) G.paused = !G.paused;  /* spacebar */
+        if(ch == 'a' || ch == 'A') G.ai_vs_ai = !G.ai_vs_ai;
 
-        if(!G.paused){ move_ball(); ai_move(); }
+        if(!G.paused){ move_ball(); ai_move(); if(G.ai_vs_ai) ai_move_left(); }
         render();
         /* drift angle slightly every frame -- shows live posit32 */
         if(!G.paused && G.frame % 3 == 0)
