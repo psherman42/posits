@@ -215,4 +215,198 @@ static double bquire_sum(double *a, int n) {
     return bquire_round(&q);
 }
 
+/* -- B-posit range helpers (pure integer, no FPU) ------------- */
+
+static uint32_t bposit_minpos(void)
+{
+    /* k=-(RS-1), e=0, f=0: (RS-1) zeros + stop-1 + ES zeros */
+    return 1u << (BPOSIT_N - 1 - BPOSIT_RS);
+}
+
+static uint32_t bposit_maxpos(void)
+{
+    /* k=+(RS-1), e=max, f=all-ones */
+    int stop = BPOSIT_N - 1 - BPOSIT_RS;
+    uint32_t p;
+    p  = ((1u << (BPOSIT_RS - 1)) - 1u) << (stop + 1); /* regime ones  */
+    p |= ((1u << BPOSIT_ES)       - 1u) << (stop - BPOSIT_ES); /* exp ones */
+    p |= (1u << (stop - BPOSIT_ES)) - 1u;               /* frac ones    */
+    return p;
+}
+
+/* -- B-posit integer posit-bits API ---------------------------- */
+
+static void bquire_add_posit(bquire_t *q, uint32_t p)
+{
+    uint32_t mag;
+    int sign, neg, k, e, E, bit, fi, bp;
+
+    if (p == 0x80000000u) { q->nar = 1; return; }
+    if (p == 0)            return;
+
+    sign = (int)((p >> 31) & 1u);
+    neg  = sign;
+    mag  = sign ? (uint32_t)(-(int32_t)p) : p;
+
+    bit = 30;
+    if ((mag >> 30) & 1u) {              /* leading 1s: k >= 0 */
+        k = -1;
+        while (bit >= 0 && ((mag >> bit) & 1u)) {
+            k++;
+            if (k >= BPOSIT_RS - 1) { bit--; break; }  /* cap at rs */
+            bit--;
+        }
+        if (bit >= 0 && k < BPOSIT_RS - 1) bit--;      /* stop-0   */
+    } else {                             /* leading 0s: k < 0  */
+        k = 0;
+        while (bit >= 0 && !((mag >> bit) & 1u)) {
+            k--;
+            if (-k >= BPOSIT_RS) { bit--; break; }     /* cap at rs */
+            bit--;
+        }
+        if (bit >= 0 && -k < BPOSIT_RS) bit--;         /* stop-1   */
+    }
+
+    e = 0;
+    if (bit >= 0) { e  = (int)((mag >> bit) & 1u) << 1; bit--; }
+    if (bit >= 0) { e |= (int)((mag >> bit) & 1u);       bit--; }
+
+    E  = (1 << BPOSIT_ES) * k + e;
+    bp = BPOSIT_QSIZE / 2;              /* binary point from MSB */
+
+    bquire_add_bit(q, bp - 1 - E, neg); /* implicit leading 1   */
+
+    fi = 0;
+    while (bit >= 0) {
+        if ((mag >> bit) & 1u)
+            bquire_add_bit(q, bp - E + fi, neg);
+        bit--;
+        fi++;
+    }
+}
+
+static int bqget(const uint32_t *w, int qb, int qsize)
+{
+    if (qb < 0 || qb >= qsize) return 0;
+    return (int)((w[qb / 32] >> (31 - qb % 32)) & 1u);
+}
+
+static uint32_t bquire_round_posit(bquire_t *q)
+{
+    uint32_t mag[BPOSIT_QWORDS], bits, frac, sb_mask;
+    uint64_t carry;
+    int sign_neg, all_zero, lead_qbit;
+    int i, j, k, e, E, pos, bp;
+    int rb, exp_bits, frac_bits, max_e;
+    int round_qb, round_bit, sticky, sb_wi, sb_bi;
+    int useed_exp = (1 << BPOSIT_ES);
+    int max_k = BPOSIT_RS - 1;
+
+    if (q->nar) return 0x80000000u;
+
+    sign_neg = (int)((q->w[0] >> 31) & 1u);
+    for (i = 0; i < BPOSIT_QWORDS; i++) mag[i] = q->w[i];
+    if (sign_neg) {
+        carry = 1;
+        for (i = BPOSIT_QWORDS - 1; i >= 0; i--) {
+            uint64_t t = (uint64_t)(~mag[i]) + carry;
+            mag[i] = (uint32_t)t;
+            carry  = t >> 32;
+        }
+    }
+
+    all_zero = 1;
+    for (i = 0; i < BPOSIT_QWORDS; i++) if (mag[i]) { all_zero = 0; break; }
+    if (all_zero) return 0u;
+
+    lead_qbit = -1;
+    for (i = 0; i < BPOSIT_QWORDS && lead_qbit < 0; i++) {
+        if (mag[i]) {
+            for (j = 31; j >= 0; j--) {
+                if ((mag[i] >> j) & 1u) {
+                    lead_qbit = i * 32 + (31 - j);
+                    break;
+                }
+            }
+        }
+    }
+
+    bp = BPOSIT_QSIZE / 2;
+    E  = bp - 1 - lead_qbit;
+
+    bits = 0x7FFFFFFFu;
+    if (E >  useed_exp * max_k + (useed_exp-1))
+        return sign_neg ? (uint32_t)(-(int32_t)bits) : bits;
+    if (E < -useed_exp * max_k)
+        return sign_neg ? 0xFFFFFFFFu : 0u;
+
+    k = (E >= 0) ? (E / useed_exp) : ((E - useed_exp + 1) / useed_exp);
+    e = E - useed_exp * k;
+
+    rb        = (k >= 0) ? k + 2 : (-k) + 1;
+    if (rb        > BPOSIT_RS + 1) rb = BPOSIT_RS + 1;
+    exp_bits  = BPOSIT_N - 1 - rb;
+    if (exp_bits  > BPOSIT_ES) exp_bits  = BPOSIT_ES;
+    if (exp_bits  < 0)         exp_bits  = 0;
+    frac_bits = BPOSIT_N - 1 - rb - exp_bits;
+    if (frac_bits < 0) frac_bits = 0;
+
+    frac = 0u;
+    for (i = 0; i < frac_bits; i++)
+        if (bqget(mag, bp - E + i, BPOSIT_QWORDS * 32))
+            frac |= 1u << (frac_bits - 1 - i);
+
+    round_qb  = bp - E + frac_bits;
+    round_bit = bqget(mag, round_qb, BPOSIT_QWORDS * 32);
+    sticky    = 0;
+    if (round_qb + 1 < BPOSIT_QWORDS * 32) {
+        sb_wi   = (round_qb + 1) / 32;
+        sb_bi   = 31 - (round_qb + 1) % 32;
+        sb_mask = (sb_bi >= 31) ? 0xFFFFFFFFu : (1u << (sb_bi + 1)) - 1u;
+        if (sb_wi < BPOSIT_QWORDS && (mag[sb_wi] & sb_mask)) sticky = 1;
+        for (i = sb_wi + 1; i < BPOSIT_QWORDS && !sticky; i++)
+            if (mag[i]) sticky = 1;
+    }
+
+    if (round_bit && (sticky || (frac & 1u))) {
+        max_e = exp_bits ? (1 << exp_bits) - 1 : 0;
+        frac++;
+        if (frac >= (1u << frac_bits)) {
+            frac = 0u;
+            if (++e > max_e) {
+                e = 0;
+                if (++k > max_k) {
+                    bits = 0x7FFFFFFFu;
+                    return sign_neg ? (uint32_t)(-(int32_t)bits) : bits;
+                }
+                rb        = k + 2;
+                if (rb > BPOSIT_RS + 1) rb = BPOSIT_RS + 1;
+                exp_bits  = BPOSIT_N - 1 - rb;
+                if (exp_bits > BPOSIT_ES) exp_bits = BPOSIT_ES;
+                if (exp_bits < 0)         exp_bits = 0;
+                frac_bits = BPOSIT_N - 1 - rb - exp_bits;
+                if (frac_bits < 0) frac_bits = 0;
+            }
+        }
+    }
+
+    bits = 0u;
+    pos  = 30;
+    if (k >= 0) {
+        for (i = 0; i < k + 1 && pos >= 0; i++) { bits |= 1u << pos; pos--; }
+        if (pos >= 0) pos--;
+    } else {
+        for (i = 0; i < -k && pos >= 0; i++) pos--;
+        if (pos >= 0) { bits |= 1u << pos; pos--; }
+    }
+    if (exp_bits >= 1 && pos >= 0) { bits |= (uint32_t)((e >> 1) & 1u) << pos; pos--; }
+    if (exp_bits >= 2 && pos >= 0) { bits |= (uint32_t)(e & 1u)        << pos; pos--; }
+    for (i = frac_bits - 1; i >= 0 && pos >= 0; i--, pos--) {
+        bits |= (uint32_t)((frac >> i) & 1u) << pos;
+    }
+
+    if (sign_neg) bits = (uint32_t)(-(int32_t)bits);
+
+    return bits;
+}
 #endif /* BPOSIT_QUIRE_H */

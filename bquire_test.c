@@ -50,5 +50,47 @@ int main(void) {
     printf("clz32(0x00000001) = %d (exp 31)\n", bposit_clz32(0x00000001));
     printf("clz32(0x00000000) = %d (exp 32)\n", bposit_clz32(0x00000000));
 
+    /* posit bits API tests */
+    {
+        uint32_t r;
+        bquire_t qp;
+
+        bquire_clear(&qp);
+        bquire_add_posit(&qp, 0);
+        r = bquire_round_posit(&qp);
+        printf("bposit zero      = 0x%08x (exp 0x00000000) %s\n",
+               r, r==0 ? "PASS" : "FAIL");
+
+        bquire_clear(&qp);
+        bquire_add_posit(&qp, 0x80000000u);
+        r = bquire_round_posit(&qp);
+        printf("bposit nar       = 0x%08x (exp 0x80000000) %s\n",
+               r, r==0x80000000u ? "PASS" : "FAIL");
+
+        bquire_clear(&qp);
+        bquire_add_posit(&qp, 0x40000000u);
+        r = bquire_round_posit(&qp);
+        printf("bposit one       = 0x%08x (exp 0x40000000) %s\n",
+               r, r==0x40000000u ? "PASS" : "FAIL");
+
+        bquire_clear(&qp);
+        bquire_add_posit(&qp, 0x40000000u);
+        bquire_add_posit(&qp, 0xC0000000u);
+        r = bquire_round_posit(&qp);
+        printf("bposit 1-1       = 0x%08x (exp 0x00000000) %s\n",
+               r, r==0 ? "PASS" : "FAIL");
+
+        uint32_t mn = bposit_minpos();
+        uint32_t mx = bposit_maxpos();
+        uint32_t neg_mx = (uint32_t)(-(int32_t)mx);
+        bquire_clear(&qp);
+        bquire_add_posit(&qp, mx);
+        bquire_add_posit(&qp, mn);
+        bquire_add_posit(&qp, neg_mx);
+        r = bquire_round_posit(&qp);
+        printf("bposit gustafson = 0x%08x (exp 0x%08x) %s\n",
+               r, mn, r==mn ? "PASS" : "FAIL");
+    }
+
     return 0;
 }
