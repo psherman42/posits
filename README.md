@@ -35,7 +35,7 @@ Match: x=OK y=OK z=OK
 ```
 
 Target: posit32 sin(πx) correctly rounded for all 2^31 inputs,
-running on a bare FE310 microcontroller with no OS, no FPU, no extensions.
+running on a bare single-core microcontroller with no OS, no FPU, no extensions.
 696 bytes of hard-case table. Pure shifts and adds.
 
 ---
@@ -87,6 +87,18 @@ Exhaustive correctness check - 3 min on 64 harts, hours on a laptop. Adjust thre
 ```bash
 cc -o trig56_exhaust trig56_exhaust.c -lm -lpthread && ./trig56_exhaust 4
 ```
+
+Tapered Pong -- posit32 CORDIC ball physics, predictive AI, AI-vs-AI mode:
+
+```bash
+cc -O2 -o posit_pong posit_pong.c posit32_sin56_rv32i.c \
+   posit_trig56_rv32i.s -I. -lm && ./posit_pong
+```
+
+Controls: w/s=paddle  t=swap sides  a=AI-vs-AI  space=pause  q=quit
+
+No double anywhere. Ball physics, AI, angle, sin/cos all integer.
+Pure posit32 RV32I CORDIC. Runs on bare RV32I + terminal or OLED.
 
 No dependencies. No build system. C89 throughout.
 

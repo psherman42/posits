@@ -35,7 +35,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
-#include <math.h>
 #include <time.h>
 #include <termios.h>
 #include <unistd.h>
@@ -198,20 +197,19 @@ static void render(void){
     char info[80];
     uint32_t sin_v = rv32i_sin_pi56(G.angle);
     uint32_t cos_v = rv32i_cos_pi56(G.angle);
-    double sx = posit_to_double(cos_v) * G.dx_sign;
-    double sy = -posit_to_double(sin_v) * G.dy_sign;
-    int deg = (int)(atan2(sy, sx) * 180.0 / 3.14159265);
-    if(deg < -180) deg += 360;
+    int sin_t = posit_to_q16(sin_v) * 10000 / 65536;
+    int cos_t = posit_to_q16(cos_v) * 10000 / 65536;
+    int angle_mdeg = (int)((int64_t)posit_to_q16(G.angle) * 360000 / 65536);
+    if(G.dx_sign < 0) angle_mdeg = 180000 - angle_mdeg;
+    if(G.dy_sign < 0) angle_mdeg = -angle_mdeg;
     /* COARSE ZONE: ball in low-precision region of posit32
      * Step size large -- ball jumps past AI. Not a bug. That's the point.
      * Human who knows posit32 tapered precision can exploit this to win. */
     int32_t bx_q = posit_to_q16(G.bx);
     int in_coarse = (bx_q < 6553 || bx_q > 58982);  /* < 0.1 or > 0.9 */
     snprintf(info, sizeof(info),
-             " angle=%3d\xc2\xb0  sin=%+.4f  cos=%+.4f  %s",
-             deg,
-             posit_to_double(sin_v),
-             posit_to_double(cos_v),
+             " angle=%+d mDeg  sin=%+d  cos=%+d  (x1e-4)  %s",
+             angle_mdeg, sin_t, cos_t,
              in_coarse ? "*** COARSE ZONE -- large posit32 steps ***" :
                          "[Tapered Pong: smooth center, coarse edges]");
     /* print below board */
@@ -415,13 +413,13 @@ int main(void){
     printf("Final score: Human %d  AI %d\n", G.lscore, G.rscore);
     printf("Frames: %d\n", G.frame);
     printf("Ball angle (posit32): 0x%08x\n", G.angle);
-    printf("sin(pi*angle) = 0x%08x = %.8f\n",
+    printf("sin(pi*angle) = 0x%08x = %+d (x1e-4)\n",
            rv32i_sin_pi56(G.angle),
-           posit_to_double(rv32i_sin_pi56(G.angle)));
-    printf("cos(pi*angle) = 0x%08x = %.8f\n",
+           posit_to_q16(rv32i_sin_pi56(G.angle)) * 10000 / 65536);
+    printf("cos(pi*angle) = 0x%08x = %+d (x1e-4)\n",
            rv32i_cos_pi56(G.angle),
-           posit_to_double(rv32i_cos_pi56(G.angle)));
-    printf("\nNo double in game logic. Pure posit32 RV32I CORDIC.\n");
+           posit_to_q16(rv32i_cos_pi56(G.angle)) * 10000 / 65536);
+    printf("\nNo double anywhere. Pure posit32 RV32I CORDIC.\n");
     printf("Volder 1959. Gustafson 2026. Woz smiles 2026.\n");
     return 0;
 }
