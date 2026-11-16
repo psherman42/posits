@@ -48,6 +48,8 @@ running on a bare FE310 microcontroller with no OS, no FPU, no extensions.
 | `microuniversal.h`     | MAC abstraction: dot and sum function pointers                       |   75  |
 | `quire32.h`            | 512-bit exact accumulator for posit\<32,2\>                          |  150  |
 | `bposit_quire.h`       | B-posit quire: parameterized, 172-bit at es=2,rs=6                   |  180  |
+| `bposit_quire_double.h`| B-posit quire: double-precision API (Warsy CoNGA 2026); includes bposit_quire.h | 100 |
+| `posit_trig56_rv32i.s` | 56-iteration CORDIC in pure RV32I assembly; ADD32C/SUB32B/ADD32HC/SUB32HS macros | ~400 |
 | `posit_math.h`         | posit32 math: sqrt, CORDIC sin/cos, erfc, haversine, Chauvenet       | ~400  |
 | `posit_trig56.h`       | 56-bit CORDIC sin/cos + sin_pi/cos_pi; 99.20% CR on exhaustive check | ~200  |
 | `trig56_exhaust.c`     | Exhaustive posit32 sin56 verify, 64-thread parallel, Pioneer SG2042  | ~180  |
@@ -136,15 +138,16 @@ N=11: posit32+Kahan beats double+Kahan by 30x. Tapered precision near
 
 ## posit32 sin/cos -- exhaustive correctness check
 
-56-bit CORDIC (`posit_trig56.h`) verified against all 2.1 billion
-positive posit32 inputs on Pioneer SG2042, 64 threads, 3.0 minutes:
+Three-layer approach: Gustafson threshold (71.7M inputs), adaptive Q63 CORDIC,
+adaptive Taylor, 696-byte MPFR hard-case table (248B sin + 448B cos).
+Breakthrough confirmed by J.L. Gustafson, personal communication Nov 2026.
 
-| Result | Count | Percent |
-|--------|-------|---------|
-| Correctly rounded (ulp=0) | 2,130,256,412 | 99.20% |
-| Off by 1 ULP              | 5,513,231     |  0.26% |
-| Off by 2 ULP              | 1,464,610     |  0.07% |
-| Worse                     | 10,249,395    |  0.48% |
+|          Result           |     Count     |                Percent                     |
+|---------------------------|---------------|--------------------------------------------|
+| Correctly rounded (ulp=0) | 2,147,483,513 | 100.0000%                                  |
+| Off by 1 ULP              | 135           | (libm wrong on these cases, MPFR verified) |
+| Off by 2 ULP              | 0             |                                            |
+| Worse                     | 0             |                                            |
 
 Throughput: 11.8M inputs/sec on 64 harts.
 
@@ -233,8 +236,17 @@ Quire area:  13,200 um^2 vs 57,463 um^2 (77% reduction)
 Wall-clock:  0.57 us vs 3.26 us MAC loop (5.7x faster)
 ```
 
-The B-posit es/rs analysis was suppressed from public presentation.
-It is published here, openly, with full attribution.
+**Integer API (no FPU, bare RV32I):**
+```c
+#include "bposit_quire.h"   /* pure integer -- no math.h */
+bquire_add_posit(&q, p);    /* accumulate posit32 raw bits */
+bquire_round_posit(&q);     /* round to nearest posit32 raw bits */
+```
+John Gustafson: "everything expressed as integer operations, totally portable
+to anything that can add, subtract, multiply, divide, and shift." (personal
+communication, Nov 2026)
+
+The B-posit es/rs analysis is published here, openly, with full attribution.
 
 ---
 
@@ -303,9 +315,11 @@ es/rs design space analysis, hardware synthesis results. CoNGA 2026,
 Submission 7: "Closing the Performance Gap of Posit Arithmetic Hardware:
 A RISC-V Fife Core Case Study."
 
-**Paul Sherman, Kurt Keville (2026)** — flat128: exact 128-bit accumulation
-via two-product splitting on RISC-V. Zenodo:
-[10.5281/zenodo.23246819](https://doi.org/10.5281/zenodo.23246819)
+**Nelson Beebe (2017)** — *The Mathematical Function Computation Handbook*
+(Springer). Covers CORDIC and alternative trig approaches objectively.
+Does not know about the Minefield Method (Table-Maker's Dilemma via
+exhaustive MPFR verification). Reference confirmed by J.L. Gustafson,
+Nov 2026.
 
 ---
 
@@ -313,6 +327,7 @@ via two-product splitting on RISC-V. Zenodo:
 
 All RV32I base. All in integer registers.
 172-bit B-posit quire in 6 register pairs.
+sin(πx)/cos(πx) correctly rounded for all 2^31 positive posit32 inputs.
 No blob. Transparent to the electron.
 
 ---
