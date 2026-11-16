@@ -18,3 +18,16 @@ exhaust_42.txt
 exhaust_cospi
 exhaust_sinpi
 map_sim_interactive
+list_sin_failures
+mpfr_sinpi
+posit_pong
+tapered_pong
+test_quire32_posit
+trig56_exhaust_sinpi
+exhaust_sinpi_clean.txt
+exhaust_sinpi_clean2.txt
+exhaust_sinpi_thresholds.txt
+exhaust_sinpi_thresholds2.txt
+exhaust_cospi_gustafson.txt
+exhaust_cospi_thresholds.txt
+li_image_prompts.txt
