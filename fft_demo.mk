@@ -6,8 +6,10 @@
 #
 
 RVGNU = riscv64-unknown-elf
-AOPS  = -march=rv32imac -mabi=ilp32
-COPS  = -march=rv32imac -mabi=ilp32 -Wall -O2 -nostdlib -nostartfiles -ffreestanding
+#AOPS  = -march=rv32imac -mabi=ilp32
+#COPS  = -march=rv32imac -mabi=ilp32 -Wall -O2 -nostdlib -nostartfiles -ffreestanding
+AOPS  = -march=rv32imac_zicsr -mabi=ilp32
+COPS  = -march=rv32imac_zicsr -mabi=ilp32 -Wall -O2 -nostdlib -nostartfiles -ffreestanding
 LKOPS = -b elf32-littleriscv
 
 PGM = fft_demo

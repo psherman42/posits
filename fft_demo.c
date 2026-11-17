@@ -8,7 +8,6 @@
 
 #include <stdint.h>
 #include "fixfft.h"
-#include "sinetab.h"
 #include "i2s.h"
 #include "pwm.h"
 #include "timer.h"
@@ -16,7 +15,7 @@
 #include "oled.h"
 #include "util.h"
 
-uint32_t clock_init_ext_dir (void);  // prci.s
+uint32_t clock_init_xdir (void);  // prci.s
 
 void main (void)
 {
@@ -28,7 +27,7 @@ void main (void)
   volatile uint32_t x;
 
   gpio_init();
-  hfclk_hz = clock_init_ext_dir();
+  hfclk_hz = clock_init_xdir();
   oled_init( hfclk_hz, 1000000 );  // SPI clock = 1 MHz
 
   i2s_init();
