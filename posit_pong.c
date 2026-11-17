@@ -204,7 +204,10 @@ static void render(void){
     if(G.dy_sign < 0) angle_mdeg = -angle_mdeg;
     /* COARSE ZONE: ball in low-precision region of posit32
      * Step size large -- ball jumps past AI. Not a bug. That's the point.
-     * Human who knows posit32 tapered precision can exploit this to win. */
+     * Human who knows posit32 tapered precision can exploit this to win.
+     * EXPLOIT: hit paddle corner -> steep angle -> bounces -> angle drift -> VOOM.
+     * AI tracks y-centroid only. No model of precision geometry. Human wins.
+     * -- Paul Sherman, discovered in play, Nov 16 2026                      */
     int32_t bx_q = posit_to_q16(G.bx);
     int in_coarse = (bx_q < 6553 || bx_q > 58982);  /* < 0.1 or > 0.9 */
     snprintf(info, sizeof(info),
