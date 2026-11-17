@@ -33,11 +33,11 @@ fft_demo.o: fft_demo.c; $(RVGNU)-gcc $(COPS) -c $< -o $@
 
 $(PGM)-ram.elf: fe310-g002-ram.lds $(OBJECTS)
 	$(RVGNU)-ld $(OBJECTS) -T fe310-g002-ram.lds -o $@ -Map $(PGM)-ram.map $(LKOPS)
-	$(RVGNU)-objdump -D $@ > $(PGM)-ram.lst
+	-$(RVGNU)-objdump -D $@ > $(PGM)-ram.lst
 
 $(PGM)-rom.elf: fe310-g002-rom.lds $(OBJECTS)
 	$(RVGNU)-ld $(OBJECTS) -T fe310-g002-rom.lds -o $@ -Map $(PGM)-rom.map $(LKOPS)
-	$(RVGNU)-objdump -D $@ > $(PGM)-rom.lst
+	-$(RVGNU)-objdump -D $@ > $(PGM)-rom.lst
 
 $(PGM)-ram.bin: $(PGM)-ram.elf
 	$(RVGNU)-objcopy $< -O binary $@
