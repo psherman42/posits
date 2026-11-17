@@ -208,10 +208,9 @@ static void render(void){
     int32_t bx_q = posit_to_q16(G.bx);
     int in_coarse = (bx_q < 6553 || bx_q > 58982);  /* < 0.1 or > 0.9 */
     snprintf(info, sizeof(info),
-             " angle=%+d mDeg  sin=%+d  cos=%+d  (x1e-4)  %s",
+             " ang=%+dmDeg sin=%+d cos=%+d (1e-4) %-10s",
              angle_mdeg, sin_t, cos_t,
-             in_coarse ? "*** COARSE ZONE -- large posit32 steps ***" :
-                         "[Tapered Pong: smooth center, coarse edges]");
+             in_coarse ? "[COARSE]" : "[smooth]");
     /* print below board */
 
     /* move cursor to top, draw */
