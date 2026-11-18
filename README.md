@@ -113,3 +113,27 @@ BCLK rates: 300 / 1000 / 1340 / 2000 / 3000 / 4000 / 4800 kHz.
 ---
 
 *Tested on LoFive R1 (SiFive FE310-G002). All integer. No FPU. No OS.*
+
+---
+
+## When to Use Posit Arithmetic (and When Not To)
+
+![Signal Path vs. Inference Layer](posit-signal-inference-boundary.jpg)
+
+> **Fixed-point for the signal path. Posit for the inference layer.**
+
+### When NOT to use posit
+
+* **FFT butterflies:** Fixed-point (`int16_t`) wins every time. Known dynamic range, uniform precision across bins, single-cycle hardware integer multiplies. See `fft_demo.c`.
+* **Deterministic inner loops:** Anywhere you know your value bounds cold and require strictly predictable cycle counts.
+* **Signal acquisition:** Your ADC hands you integers — keep them integers.
+
+### When posit earns its place
+
+* **Scoring and ranking:** Harmonic confidence, pitch likelihood, probabilistic weights — you need graceful underflow in the tails, not a flush-to-zero cliff.
+* **Multi-frame accumulation:** A posit quire (`bposit_quire`) is an exact accumulator. Rounding drift across long integration windows simply does not exist.
+* **Physics-adjacent math:** Sigmoids, `erfc`, Chauvenet's criterion — functions that live near zero and near one simultaneously, where tapered precision matters.
+* **32-bit targets, 64-bit accuracy:** Posit32 matches double-precision float in the regime near 1.0 — without the FPU, without promoting to 64 bits.
+
+For the full treatment with signal-path examples from this codebase, see
+[When to Use Posit Arithmetic — and When Not To](https://lab.riscvthai.org/posits/when-to-use-posit.html).
