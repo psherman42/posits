@@ -58,15 +58,17 @@ One source of truth — edits on `rv32i-asm` are immediately visible in `fe310`.
 
 ## Apps
 
-| App | File | What it does |
-|-----|------|-------------|
-| FFT demo | `fft_demo.c` / `fft_demo.mk` | I2S mic → FFT → OLED spectrum display |
-| Pitch | `pitch.c` / `pitch.mk` | Guitar string tuner from chord (I2S → FFT → harmonic analysis) |
-| Flicker | `flicker.c` / `flicker.mk` | LED flicker meter / IEEE 1789 compliance (photodiode → FFT → classify) |
-| Bandleader | `bandleader.c` / `bandleader.mk` | Ensemble sync/tuning detector |
-| Wumpus | `wumpus.c` / `wumpus.mk` | Hunt the Wumpus — posit policy network |
-| Maze | `maze.c` / `maze.mk` | Robot maze solver — posit micro-AI |
-| Stego | `stego.c` / `stego.mk` | Neural steganography — hide a message in image or audio |
+|       App         |             File                 | What it does |
+|-------------------|----------------------------------|--------------|
+| posit_hello       | `posit_hello.c`                  | posit4 hello world — all 16 values, quire demo, no libraries |
+| posit_hello (asm) | `posit_hello_rv32i.s`            | same in pure RV32I assembly — quire is 3 ADDs |
+| FFT demo          | `fft_demo.c` / `fft_demo.mk`     | I2S mic → FFT → OLED spectrum display |
+| Pitch             | `pitch.c` / `pitch.mk`           | Guitar string tuner from chord (I2S → FFT → harmonic analysis) |
+| Flicker           | `flicker.c` / `flicker.mk`       | LED flicker meter / IEEE 1789 compliance (photodiode → FFT → classify) |
+| Bandleader        | `bandleader.c` / `bandleader.mk` | Ensemble sync/tuning detector |
+| Wumpus            | `wumpus.c` / `wumpus.mk`         | Hunt the Wumpus — posit policy network |
+| Maze              | `maze.c` / `maze.mk`             | Robot maze solver — posit micro-AI |
+| Stego             | `stego.c` / `stego.mk`           | Neural steganography — hide a message in image or audio |
 
 ---
 
